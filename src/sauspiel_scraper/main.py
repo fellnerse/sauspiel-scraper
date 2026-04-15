@@ -1,15 +1,16 @@
 import json
 import re
 import time
+from datetime import datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Optional
 
 import requests
 import typer
 from bs4 import BeautifulSoup, Tag
 from dotenv import load_dotenv
 from rich.console import Console
-from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 from rich.table import Table
 
 # Load .env if it exists
@@ -99,9 +100,7 @@ class SauspielScraper:
             resp = self.session.get(self.LOGIN_URL)
             soup = BeautifulSoup(resp.text, "html.parser")
             token_input = soup.find("input", {"name": "authenticity_token"})
-            token = (
-                token_input["value"] if token_input and isinstance(token_input, Tag) else None
-            )
+            token = token_input["value"] if token_input and isinstance(token_input, Tag) else None
 
         payload = {
             "utf8": "✓",
@@ -125,21 +124,49 @@ class SauspielScraper:
         else:
             self.user_id = "313407"
 
-    def get_game_list(self, limit: int = 10) -> list[str]:
-        url = f"{self.BASE_URL}/spiele?player_id={self.user_id}"
-        resp = self.session.get(url)
-        soup = BeautifulSoup(resp.text, "html.parser")
+    def get_game_list(self, limit: int | None = 10, since: datetime | None = None) -> list[str]:
         game_ids: list[str] = []
-        links = soup.find_all("a", href=re.compile(r"^/spiele/\d+"))
-        for link in links:
-            href = str(link.get("href", ""))
-            match = re.search(r"/spiele/(\d+)", href)
-            if match:
-                gid = match.group(1)
-                if gid not in game_ids:
-                    game_ids.append(gid)
-            if len(game_ids) >= limit:
+        page = 1
+
+        while True:
+            url = f"{self.BASE_URL}/spiele?player_id={self.user_id}&page={page}"
+            resp = self.session.get(url)
+            soup = BeautifulSoup(resp.text, "html.parser")
+
+            items = soup.find_all("div", class_="games-item")
+            if not items:
                 break
+
+            for item in items:
+                # Check date
+                subtext = item.find("p", class_="card-title-subtext")
+                if since and subtext:
+                    # Format: 15.04.2026 17:56, in der Wirtschaft
+                    date_match = re.search(r"(\d{2}\.\d{2}\.\d{4}\s\d{2}:\d{2})", subtext.get_text())
+                    if date_match:
+                        game_date = datetime.strptime(date_match.group(1), "%d.%m.%Y %H:%M")
+                        if game_date < since:
+                            return game_ids
+
+                h4 = item.find("h4", class_="card-title")
+                link = h4.find("a") if h4 and isinstance(h4, Tag) else None
+                if link and isinstance(link, Tag):
+                    href = str(link.get("href", ""))
+                    match = re.search(r"/spiele/(\d+)", href)
+                    if match:
+                        gid = match.group(1)
+                        if gid not in game_ids:
+                            game_ids.append(gid)
+
+                if limit and len(game_ids) >= limit:
+                    return game_ids
+
+            # Check for next page
+            next_link = soup.find("a", class_="next_page")
+            if not next_link:
+                break
+            page += 1
+
         return game_ids
 
     def scrape_game(self, game_id: str) -> dict[str, Any]:
@@ -192,7 +219,9 @@ class SauspielScraper:
                 continue
             winner_div = card_div.find("div", class_="game-participant-avatar")
             winner_a = winner_div.find("a") if winner_div and isinstance(winner_div, Tag) else None
-            winner_name = str(winner_a["data-username"]) if winner_a and isinstance(winner_a, Tag) else None
+            winner_name = (
+                str(winner_a["data-username"]) if winner_a and isinstance(winner_a, Tag) else None
+            )
 
             trick_data: dict[str, Any] = {
                 "winner_index": (
@@ -240,7 +269,13 @@ def scrape(
             help="Sauspiel password",
         ),
     ],
-    count: Annotated[int, typer.Option("--count", "-c", help="Number of games to scrape")] = 5,
+    count: Annotated[
+        Optional[int], typer.Option("--count", "-c", help="Number of games to scrape")
+    ] = None,
+    since: Annotated[
+        Optional[str],
+        typer.Option("--since", "-s", help="Scrape games since date (DD.MM.YYYY)"),
+    ] = None,
     output: Annotated[
         Path, typer.Option("--output", "-o", help="Output JSON file path")
     ] = Path("output/games.json"),
@@ -248,6 +283,17 @@ def scrape(
     """
     Scrape recent games from sauspiel.de.
     """
+    if count is None and since is None:
+        count = 5  # Default if nothing provided
+
+    since_dt = None
+    if since:
+        try:
+            since_dt = datetime.strptime(since, "%d.%m.%Y")
+        except ValueError:
+            console.print("[bold red]Error: Invalid date format for --since. Use DD.MM.YYYY[/]")
+            raise typer.Exit(1)
+
     output.parent.mkdir(parents=True, exist_ok=True)
     scraper = SauspielScraper(username, password)
 
@@ -257,21 +303,21 @@ def scrape(
             raise typer.Exit(1)
 
     with console.status("[bold blue]Fetching game list...", spinner="dots"):
-        game_ids = scraper.get_game_list(limit=count)
-    
+        game_ids = scraper.get_game_list(limit=count, since=since_dt)
+
     if not game_ids:
         console.print("[yellow]No games found.[/]")
         return
 
     console.print(f"[bold green]Found {len(game_ids)} games. Starting scrape...[/]")
-    
+
     results = []
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
         BarColumn(),
         TaskProgressColumn(),
-        console=console
+        console=console,
     ) as progress:
         task = progress.add_task("[cyan]Scraping...", total=len(game_ids))
         for gid in game_ids:
