@@ -144,7 +144,6 @@ class SauspielScraper:
                 subtext = item.find("p", class_="card-title-subtext")
                 if subtext:
                     txt = subtext.get_text()
-                    # Date
                     date_match = re.search(r"(\d{2}\.\d{2}\.\d{4}\s\d{2}:\d{2})", txt)
                     if date_match:
                         game_date = datetime.strptime(date_match.group(1), "%d.%m.%Y %H:%M")
@@ -152,12 +151,9 @@ class SauspielScraper:
                             return games
                         game_meta["date"] = game_date.isoformat()
 
-                    # Location & Deck
-                    # Example: 15.04.2026 17:56, in der Wirtschaft — Lange Karte
                     parts = [p.strip() for p in txt.split("—")]
                     if len(parts) >= 2:
                         game_meta["deck_type"] = parts[-1]
-                        # Location is often between date and deck
                         loc_part = parts[0].split(",")[-1].strip() if "," in parts[0] else None
                         if loc_part:
                             game_meta["location"] = loc_part
@@ -175,7 +171,6 @@ class SauspielScraper:
                 if limit and len(games) >= limit:
                     return games
 
-            # Check for next page
             next_link = soup.find("a", class_="next_page")
             if not next_link:
                 break
@@ -200,9 +195,7 @@ class SauspielScraper:
             "meta": list_meta.copy(),
         }
 
-        # Extract game type from title
         if game_data["title"]:
-            # e.g. "Sauspiel auf die Blaue..." -> Sauspiel
             game_data["game_type"] = game_data["title"].split()[0]
 
         hand_rows = soup.find_all("div", id=re.compile(r"_Karten$"))
@@ -243,7 +236,7 @@ class SauspielScraper:
             )
 
             trick_data: dict[str, Any] = {
-                "winner_index": (
+                "winner": (
                     game_data["players"].index(winner_name)
                     if winner_name in game_data["players"]
                     else None
@@ -256,16 +249,11 @@ class SauspielScraper:
                 p_name = p_link.get_text(strip=True) if p_link else None
                 c_span = ce.find("span", class_="card-image")
                 c_title = c_span.get("title") if c_span and isinstance(c_span, Tag) else None
-                trick_data["cards"].append(
-                    {
-                        "player_index": (
-                            game_data["players"].index(p_name)
-                            if p_name in game_data["players"]
-                            else None
-                        ),
-                        "card": self.encode_card(c_title),
-                    }
-                )
+                
+                p_idx = game_data["players"].index(p_name) if p_name in game_data["players"] else "?"
+                c_code = self.encode_card(c_title) or "?"
+                trick_data["cards"].append(f"{p_idx}:{c_code}")
+                
             game_data["tricks"].append(trick_data)
 
         return game_data
@@ -296,11 +284,14 @@ def scrape(
         typer.Option("--since", "-s", help="Scrape games since date (DD.MM.YYYY)"),
     ] = None,
     output: Annotated[
-        Path, typer.Option("--output", "-o", help="Output JSONL file path")
+        Path, typer.Option("--output", "-o", help="Output file path")
     ] = Path("output/games.jsonl"),
+    pretty: Annotated[
+        bool, typer.Option("--pretty", help="Save as a single pretty-printed JSON array")
+    ] = False,
 ) -> None:
     """
-    Scrape recent games from sauspiel.de and save as JSONL.
+    Scrape recent games from sauspiel.de.
     """
     if count is None and since is None:
         count = 5
@@ -330,8 +321,7 @@ def scrape(
 
     console.print(f"[bold green]Found {len(game_list)} games. Starting scrape...[/]")
 
-    # Open file for incremental writing (JSONL)
-    success_count = 0
+    results = []
     with Progress(
         SpinnerColumn(),
         TextColumn("[progress.description]{task.description}"),
@@ -340,27 +330,46 @@ def scrape(
         console=console,
     ) as progress:
         task = progress.add_task("[cyan]Scraping...", total=len(game_list))
-        with open(output, "w", encoding="utf-8") as f:
+        
+        # Open file if not in pretty mode
+        f = None if pretty else open(output, "w", encoding="utf-8")
+        
+        try:
             for game_info in game_list:
                 gid = game_info["game_id"]
                 progress.update(task, description=f"[cyan]Scraping Game {gid}...")
                 
                 try:
                     game_data = scraper.scrape_game(gid, game_info)
-                    f.write(json.dumps(game_data, ensure_ascii=False) + "\n")
-                    f.flush()
-                    success_count += 1
+                    if pretty:
+                        results.append(game_data)
+                    else:
+                        assert f is not None
+                        f.write(json.dumps(game_data, ensure_ascii=False) + "\n")
+                        f.flush()
+                    
                 except Exception as e:
                     console.print(f"[red]Error scraping game {gid}: {e}[/]")
                 
                 progress.advance(task)
                 time.sleep(0.5)
+        finally:
+            if f:
+                f.close()
 
-    # Show summary table
+    if pretty:
+        with open(output, "w", encoding="utf-8") as f_out:
+            json.dump(results, f_out, ensure_ascii=False, indent=2)
+
     table = Table(title="Scraping Summary")
     table.add_column("Games Scraped", justify="right", style="cyan")
     table.add_column("Output File", style="magenta")
-    table.add_row(str(success_count), str(output))
+    table.add_column("Format", style="green")
+    table.add_row(
+        str(len(results) if pretty else len(game_list)), 
+        str(output), 
+        "JSON (Pretty)" if pretty else "JSONL"
+    )
     console.print(table)
 
 
