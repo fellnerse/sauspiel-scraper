@@ -8,11 +8,15 @@ import requests
 import typer
 from bs4 import BeautifulSoup, Tag
 from dotenv import load_dotenv
+from rich.console import Console
+from rich.progress import Progress, SpinnerColumn, TextColumn, BarColumn, TaskProgressColumn
+from rich.table import Table
 
 # Load .env if it exists
 load_dotenv()
 
 app = typer.Typer(help="Sauspiel Game Scraper CLI")
+console = Console()
 
 CARD_MAP = {
     "Eichel-Sau": "E-A",
@@ -95,7 +99,9 @@ class SauspielScraper:
             resp = self.session.get(self.LOGIN_URL)
             soup = BeautifulSoup(resp.text, "html.parser")
             token_input = soup.find("input", {"name": "authenticity_token"})
-            token = token_input["value"] if token_input and isinstance(token_input, Tag) else None
+            token = (
+                token_input["value"] if token_input and isinstance(token_input, Tag) else None
+            )
 
         payload = {
             "utf8": "✓",
@@ -175,7 +181,6 @@ class SauspielScraper:
                     else:
                         game_data["meta"][key] = td.get_text(strip=True)
 
-        # Using class_ instead of string to avoid overload issues with ty/bs4 types
         trick_headers = soup.find_all("h4", class_="card-title")
         for header in trick_headers:
             header_text = header.get_text(strip=True)
@@ -243,33 +248,47 @@ def scrape(
     """
     Scrape recent games from sauspiel.de.
     """
-    # Ensure output directory exists
     output.parent.mkdir(parents=True, exist_ok=True)
-
     scraper = SauspielScraper(username, password)
 
-    typer.echo(f"Logging in as {username}...")
-    if not scraper.login():
-        typer.echo("Login failed. Check your credentials.", err=True)
-        raise typer.Exit(1)
+    with console.status(f"[bold green]Logging in as {username}...", spinner="dots"):
+        if not scraper.login():
+            console.print("[bold red]Login failed. Check your credentials.[/]")
+            raise typer.Exit(1)
 
-    typer.echo("Fetching game list...")
-    game_ids = scraper.get_game_list(limit=count)
+    with console.status("[bold blue]Fetching game list...", spinner="dots"):
+        game_ids = scraper.get_game_list(limit=count)
+    
     if not game_ids:
-        typer.echo("No games found.")
+        console.print("[yellow]No games found.[/]")
         return
 
-    typer.echo(f"Found {len(game_ids)} games. Starting scrape...")
+    console.print(f"[bold green]Found {len(game_ids)} games. Starting scrape...[/]")
+    
     results = []
-    with typer.progressbar(game_ids, label="Scraping") as progress:
-        for gid in progress:
+    with Progress(
+        SpinnerColumn(),
+        TextColumn("[progress.description]{task.description}"),
+        BarColumn(),
+        TaskProgressColumn(),
+        console=console
+    ) as progress:
+        task = progress.add_task("[cyan]Scraping...", total=len(game_ids))
+        for gid in game_ids:
+            progress.update(task, description=f"[cyan]Scraping Game {gid}...")
             results.append(scraper.scrape_game(gid))
-            time.sleep(1)
+            progress.advance(task)
+            time.sleep(0.5)
 
     with open(output, "w", encoding="utf-8") as f:
         json.dump(results, f, ensure_ascii=False, indent=2)
 
-    typer.echo(f"Successfully saved {len(results)} games to {output}")
+    # Show summary table
+    table = Table(title="Scraping Summary")
+    table.add_column("Games Scraped", justify="right", style="cyan")
+    table.add_column("Output File", style="magenta")
+    table.add_row(str(len(results)), str(output))
+    console.print(table)
 
 
 if __name__ == "__main__":
