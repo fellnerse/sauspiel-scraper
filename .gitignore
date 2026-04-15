@@ -1,0 +1,21 @@
+# Python
+__pycache__/
+*.py[oc]
+build/
+dist/
+*.egg-info
+.python-version
+
+# Environment
+.env
+.venv/
+
+# Tooling
+.ruff_cache/
+.mypy_cache/
+.pre-commit/
+
+# Scraper Data
+output/
+*.html
+*.json
