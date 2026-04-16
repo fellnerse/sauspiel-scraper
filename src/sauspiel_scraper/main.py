@@ -15,21 +15,31 @@ app = typer.Typer(help="Sauspiel Game Scraper CLI")
 console = Console()
 
 
-def scrape_with_retry(scraper: SauspielScraper, gid: str, info: dict, max_retries: int = 3):
+def scrape_with_retry(scraper: SauspielScraper, gid: str, info: dict, max_retries: int = 5):
     """Attempt to scrape a game with retries and exponential backoff."""
     for attempt in range(max_retries):
         try:
             return scraper.scrape_game(gid, info)
         except RuntimeError as e:
-            if "Session expired" in str(e) or "login required" in str(e):
+            err_msg = str(e)
+            if "Session expired" in err_msg or "login required" in err_msg:
                 console.print(f"[yellow]Session expired for {gid}. Re-logging in...[/]")
                 if not scraper.login():
                     raise RuntimeError("Failed to re-login during retry.") from e
-                # After login, retry immediately
+                continue
+
+            if "Status 429" in err_msg:
+                # Specific handling for rate limiting
+                wait_429 = 30 + random.random() * 30
+                console.print(
+                    f"[red]Rate limited (429) at {gid}. "
+                    f"Waiting {wait_429:.1f}s before retry {attempt + 1}/{max_retries}...[/]"
+                )
+                time.sleep(wait_429)
                 continue
 
             if attempt < max_retries - 1:
-                wait_time = (2**attempt) + random.random() * 2
+                wait_time = (2 ** (attempt + 1)) + random.random() * 5
                 console.print(
                     f"[yellow]Retry {attempt + 1}/{max_retries} for {gid} "
                     f"in {wait_time:.1f}s: {e}[/]"
@@ -111,8 +121,8 @@ def scrape(
                     break
             
             progress.advance(task)
-            # Random delay between 0.5 and 1.5 seconds to be less bot-like
-            time.sleep(0.5 + random.random())
+            # More conservative delay: 2.0 to 4.0 seconds
+            time.sleep(2.0 + random.random() * 2.0)
 
     console.print(f"[green]Done! Database updated: {db_path}[/]")
 
