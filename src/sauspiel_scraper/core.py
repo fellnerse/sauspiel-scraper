@@ -1,5 +1,8 @@
 import re
+import json
+import sqlite3
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Generator, Optional
 
 import requests
@@ -19,6 +22,37 @@ CARD_MAP = {
     "Schellen-Unter": "S-U", "Schellen-Neun": "S-9", "Schellen-Acht": "S-8", "Schellen-Sieben": "S-7",
 }
 
+class Database:
+    def __init__(self, db_path: Path = Path("output/sauspiel.db")):
+        db_path.parent.mkdir(parents=True, exist_ok=True)
+        self.conn = sqlite3.connect(db_path, check_same_thread=False)
+        self.create_tables()
+
+    def create_tables(self) -> None:
+        self.conn.execute("""
+            CREATE TABLE IF NOT EXISTS games (
+                game_id TEXT PRIMARY KEY,
+                date TEXT,
+                game_type TEXT,
+                data TEXT
+            )
+        """)
+        self.conn.commit()
+
+    def game_exists(self, game_id: str) -> bool:
+        cursor = self.conn.execute("SELECT 1 FROM games WHERE game_id = ?", (game_id,))
+        return cursor.fetchone() is not None
+
+    def save_game(self, game_id: str, date: str, game_type: str, data: dict[str, Any]) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO games (game_id, date, game_type, data) VALUES (?, ?, ?, ?)",
+            (game_id, date, game_type, json.dumps(data, ensure_ascii=False))
+        )
+        self.conn.commit()
+
+    def get_all_games(self) -> list[dict[str, Any]]:
+        cursor = self.conn.execute("SELECT data FROM games ORDER BY date DESC")
+        return [json.loads(row[0]) for row in cursor.fetchall()]
 
 class SauspielScraper:
     BASE_URL = "https://www.sauspiel.de"
@@ -39,14 +73,12 @@ class SauspielScraper:
         return CARD_MAP.get(t, t)
 
     def is_logged_in(self) -> bool:
-        """Checks if the current session is valid."""
         try:
             resp = self.session.get(self.BASE_URL)
             if "Ausloggen" in resp.text:
                 self._identify_user_id(resp.text)
                 return True
-        except Exception:
-            pass
+        except Exception: pass
         return False
 
     def login(self) -> bool:
@@ -54,59 +86,39 @@ class SauspielScraper:
         if "Ausloggen" in resp.text:
             self._identify_user_id(resp.text)
             return True
-
         soup = BeautifulSoup(resp.text, "html.parser")
         token_meta = soup.find("meta", {"name": "csrf-token"})
         token = token_meta["content"] if token_meta and isinstance(token_meta, Tag) else None
-
         if not token:
             resp = self.session.get(self.LOGIN_URL)
             soup = BeautifulSoup(resp.text, "html.parser")
             token_input = soup.find("input", {"name": "authenticity_token"})
             token = token_input["value"] if token_input and isinstance(token_input, Tag) else None
-
-        payload = {
-            "utf8": "✓",
-            "authenticity_token": token,
-            "login": self.username,
-            "password": self.password,
-            "remember_me": "1",
-            "commit": "Anmelden",
-        }
+        payload = {"utf8": "✓", "authenticity_token": token, "login": self.username, "password": self.password, "remember_me": "1", "commit": "Anmelden"}
         resp = self.session.post(self.LOGIN_URL, data=payload, allow_redirects=True)
         success = "Ausloggen" in resp.text
-        if success:
-            self._identify_user_id(resp.text)
+        if success: self._identify_user_id(resp.text)
         return success
 
     def _identify_user_id(self, html: str) -> None:
         soup = BeautifulSoup(html, "html.parser")
-        # Try finding username in HTML if not set
         if not self.username:
             user_el = soup.find("span", class_="topbar-username-mobile")
-            if user_el:
-                self.username = user_el.get_text().strip()
-
+            if user_el: self.username = user_el.get_text().strip()
         me_link = soup.find("a", attrs={"data-username": self.username})
         if not me_link:
             for a in soup.find_all("a", href=re.compile(r"^/profile/")):
                 if self.username.lower() in a.get_text().lower():
                     me_link = a
                     break
-
         if me_link and isinstance(me_link, Tag) and me_link.has_attr("data-userid"):
             self.user_id = str(me_link["data-userid"])
         else:
             match = re.search(rf'data-userid="(\d+)"[^>]*>{self.username}', html, re.I)
-            if match:
-                self.user_id = match.group(1)
+            if match: self.user_id = match.group(1)
 
     def get_session_data(self) -> dict[str, Any]:
-        return {
-            "cookies": self.session.cookies.get_dict(),
-            "username": self.username,
-            "user_id": self.user_id
-        }
+        return {"cookies": self.session.cookies.get_dict(), "username": self.username, "user_id": self.user_id}
 
     def load_session_data(self, data: dict[str, Any]) -> None:
         self.session.cookies.update(data["cookies"])
@@ -202,11 +214,3 @@ class SauspielScraper:
                 trick_data["cards"].append(f"{p_idx}:{c_code}")
             game_data["tricks"].append(trick_data)
         return game_data
-
-
-def scrape_games_stream(
-    scraper: SauspielScraper, limit: Optional[int] = None, since: Optional[datetime] = None
-) -> Generator[dict[str, Any], None, None]:
-    game_list = scraper.get_game_list(limit=limit, since=since)
-    for game_info in game_list:
-        yield scraper.scrape_game(game_info["game_id"], game_info)
