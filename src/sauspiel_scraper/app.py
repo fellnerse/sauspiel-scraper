@@ -56,7 +56,8 @@ def process_game_data(games: list[dict[str, Any]], me: str) -> pd.DataFrame:
             role = roles_dict[me]
         else:
             # Fallback for old data in DB
-            role = "Spieler" if f"von {me}" in g.get("title", "") else "Gegenspieler"
+            title = g.get("title") or ""
+            role = "Spieler" if f"von {me}" in title else "Gegenspieler"
 
         raw_laufende = meta.get("laufende", "0")
         laufende = 0
