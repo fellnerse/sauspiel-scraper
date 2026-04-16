@@ -11,11 +11,13 @@ dependencies = [
     "beautifulsoup4>=4.14.3",
     "python-dotenv>=1.2.2",
     "requests>=2.33.1",
+    "streamlit>=1.56.0",
     "typer>=0.24.1",
 ]
 
 [project.scripts]
 sauspiel-scraper = "sauspiel_scraper.main:app"
+sauspiel-web = "sauspiel_scraper.app:main"
 
 [tool.ruff]
 line-length = 100
