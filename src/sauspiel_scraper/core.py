@@ -189,6 +189,7 @@ class SauspielScraper:
         while True:
             params = {
                 "utf8": "✓",
+                "user[login]": "",
                 "role": "all",
                 "game[balance_type]": "-1",
                 "game[short_deck]": "-1",
@@ -205,13 +206,20 @@ class SauspielScraper:
             print(f"DEBUG: Fetching page {page} with role=all...")
             resp = self.session.get(f"{self.BASE_URL}/spiele", params=params)
             soup = BeautifulSoup(resp.text, "html.parser")
+
+            # Exhaustive debug for links
+            page_links = soup.find_all("a", href=re.compile(r"page="))
+            if page_links:
+                print(f"DEBUG: Found {len(page_links)} links with 'page=' in href.")
+                for l in page_links:
+                    print(f"DEBUG: Link: {l.get('href')} | Text: {l.get_text(strip=True)}")
+
             items = soup.find_all("div", class_="games-item")
 
             if not items:
                 all_divs = soup.find_all("div")
                 print(
-                    f"DEBUG: No games-item found on page {page}. "
-                    f"Found {len(all_divs)} total divs."
+                    f"DEBUG: No games-item found on page {page}. Found {len(all_divs)} total divs."
                 )
                 if len(resp.text) < 500:
                     print(f"DEBUG: Response text: {resp.text}")
@@ -261,7 +269,11 @@ class SauspielScraper:
                             print(f"DEBUG: Reached max_new limit {max_new}")
                             return all_found
 
-            next_link = soup.find("a", class_="next_page") or soup.find("a", rel="next")
+            next_link = (
+                soup.find("a", class_="next_page")
+                or soup.find("a", rel="next")
+                or soup.find("a", href=re.compile(f"page={page + 1}"))
+            )
             if not next_link:
                 pagination = soup.find("div", class_="pagination")
                 if pagination:
