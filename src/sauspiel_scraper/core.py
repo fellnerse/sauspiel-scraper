@@ -92,13 +92,15 @@ class SauspielScraper:
         self.username = username
         self.password = password
         self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            )
-        })
+        self.session.headers.update(
+            {
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                )
+            }
+        )
         self.user_id: str | None = None
 
     def encode_card(self, title: Any) -> str | None:
@@ -202,8 +204,6 @@ class SauspielScraper:
                 "game[result]": "-1",
                 "page": page,
             }
-            if self.user_id:
-                params["player_id"] = self.user_id
 
             print(f"DEBUG: Fetching page {page} with role=all...")
             resp = self.session.get(f"{self.BASE_URL}/spiele", params=params)
@@ -211,9 +211,10 @@ class SauspielScraper:
             items = soup.find_all("div", class_="games-item")
 
             if not items:
-                print("DEBUG: No more items found.")
+                print(f"DEBUG: No games-item found on page {page}.")
                 break
 
+            print(f"DEBUG: Found {len(items)} items on page {page}.")
             for item in items:
                 game_meta: dict[str, Any] = {}
                 subtext = item.find("p", class_="card-title-subtext")
@@ -243,10 +244,13 @@ class SauspielScraper:
                         gid = match.group(1)
                         game_meta["game_id"] = gid
 
-                        if not db or not db.game_exists(gid):
+                        exists = db.game_exists(gid) if db else False
+                        if not exists:
                             new_count += 1
                             all_found.append(game_meta)
-                            print(f"DEBUG: Found new game {gid} ({new_count}/{max_new})")
+                            print(f"DEBUG: New game found: {gid}")
+                        else:
+                            print(f"DEBUG: Game {gid} already in DB.")
 
                         if new_count >= max_new and not since:
                             print(f"DEBUG: Reached max_new limit {max_new}")
@@ -313,9 +317,7 @@ class SauspielScraper:
                 if th and td:
                     key = th.get_text(strip=True).lower().replace(" ", "_")
                     if key == "klopfer":
-                        game_data["klopfer"] = [
-                            a.get_text(strip=True) for a in td.find_all("a")
-                        ]
+                        game_data["klopfer"] = [a.get_text(strip=True) for a in td.find_all("a")]
                     else:
                         game_data["meta"][key] = td.get_text(strip=True)
 
@@ -330,9 +332,7 @@ class SauspielScraper:
                 continue
 
             winner_div = card_div.find("div", class_="game-participant-avatar")
-            winner_a = (
-                winner_div.find("a") if winner_div and isinstance(winner_div, Tag) else None
-            )
+            winner_a = winner_div.find("a") if winner_div and isinstance(winner_div, Tag) else None
             winner_name = (
                 str(winner_a["data-username"]) if winner_a and isinstance(winner_a, Tag) else None
             )
