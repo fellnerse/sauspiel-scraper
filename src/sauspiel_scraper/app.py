@@ -59,6 +59,12 @@ def process_game_data(games: list[dict[str, Any]], me: str) -> pd.DataFrame:
             title = g.get("title") or ""
             role = "Spieler" if f"von {me}" in title else "Gegenspieler"
 
+        # Identify the declarer from the title "GameType von Username"
+        title = g.get("title") or ""
+        declarer = "Unknown"
+        if " von " in title:
+            declarer = title.split(" von ")[-1].strip()
+
         raw_laufende = meta.get("laufende", "0")
         laufende = 0
         try:
@@ -71,6 +77,7 @@ def process_game_data(games: list[dict[str, Any]], me: str) -> pd.DataFrame:
                 "game_id": g.get("game_id"),
                 "date": pd.to_datetime(meta.get("date")),
                 "type": g.get("game_type", "Unknown"),
+                "declarer": declarer,
                 "won": won,
                 "value": val if won else -val,
                 "role": role,
@@ -128,20 +135,24 @@ def render_analytics(df: pd.DataFrame) -> None:
     with ca:
         st.plotly_chart(px.pie(f_df, names="type", title="Game Types", hole=0.4), key="t_plot")
     with cb:
-        r_stats = f_df.groupby("role")["won"].mean().reset_index()
-        r_stats["won"] *= 100
-        st.plotly_chart(
-            px.bar(r_stats, x="role", y="won", color="role", title="Win Rate by Role (%)"),
-            key="r_plot",
-        )
+        st.plotly_chart(px.pie(f_df, names="role", title="Role Distribution", hole=0.4), key="r_pie")
+
+    r_stats = f_df.groupby("role")["won"].mean().reset_index()
+    r_stats["won"] *= 100
+    st.plotly_chart(
+        px.bar(r_stats, x="role", y="won", color="role", title="Win Rate by Role (%)"),
+        key="r_plot",
+    )
 
     st.divider()
     st.subheader("📋 Game List (Filtered)")
     # Show columns that are useful for sanity check
     display_df = f_df[
-        ["game_id", "date", "type", "role", "won", "value", "laufende", "location"]
+        ["game_id", "date", "type", "declarer", "role", "won", "value", "laufende", "location"]
     ].copy()
     display_df = display_df.sort_values("date", ascending=False)
+    # Rename declarer to Spieler for the UI
+    display_df = display_df.rename(columns={"declarer": "Spieler"})
     st.dataframe(display_df, use_container_width=True, hide_index=True)
 
 
