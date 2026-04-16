@@ -106,7 +106,6 @@ class SauspielScraper:
             user_el = soup.find("span", class_="topbar-username-mobile")
             if user_el: self.username = user_el.get_text().strip()
         
-        # Explicit search for our own username to get the ID
         me_link = soup.find("a", attrs={"data-username": self.username})
         if not me_link:
             for a in soup.find_all("a", href=re.compile(r"^/profile/")):
@@ -137,11 +136,14 @@ class SauspielScraper:
         
         while True:
             url = f"{self.BASE_URL}/spiele?player_id={self.user_id}&page={page}"
+            print(f"DEBUG: Fetching page {page}...")
             resp = self.session.get(url)
             soup = BeautifulSoup(resp.text, "html.parser")
             items = soup.find_all("div", class_="games-item")
             
-            if not items: break
+            if not items: 
+                print("DEBUG: No more items found.")
+                break
             
             for item in items:
                 game_meta: dict[str, Any] = {}
@@ -151,7 +153,9 @@ class SauspielScraper:
                     date_match = re.search(r"(\d{2}\.\d{2}\.\d{4}\s\d{2}:\d{2})", txt)
                     if date_match:
                         game_date = datetime.strptime(date_match.group(1), "%d.%m.%Y %H:%M")
-                        if since and game_date < since: return all_found
+                        if since and game_date < since: 
+                            print(f"DEBUG: Reached date threshold {since}")
+                            return all_found
                         game_meta["date"] = game_date.isoformat()
                     
                     parts = [p.strip() for p in txt.split("—")]
@@ -172,12 +176,16 @@ class SauspielScraper:
                         if not db or not db.game_exists(gid):
                             new_count += 1
                             all_found.append(game_meta)
+                            print(f"DEBUG: Found new game {gid} ({new_count}/{max_new})")
                         
                         if new_count >= max_new and not since:
+                            print(f"DEBUG: Reached max_new limit {max_new}")
                             return all_found
             
             next_link = soup.find("a", class_="next_page")
-            if not next_link: break
+            if not next_link: 
+                print("DEBUG: No next page link.")
+                break
             page += 1
             
         return all_found
@@ -196,18 +204,26 @@ class SauspielScraper:
         
         if game_data["title"]: game_data["game_type"] = game_data["title"].split()[0]
         
-        # Extract players and roles from hand rows
+        # Identify players and roles from the "Karten von" rows in the protocol
+        # These divs contain both the player name and the role
+        protocol_rows = soup.find_all("div", class_="card-row game-protocol-item")
+        for row in protocol_rows:
+            p_link = row.find("a", href=re.compile(r"^/profile/"))
+            if p_link:
+                pname = p_link.get_text(strip=True)
+                if pname not in game_data["players"]: game_data["players"].append(pname)
+                
+                # Role is in a div inside this row
+                role_el = row.find("div", class_="game-participant-role")
+                if role_el:
+                    game_data["roles"][pname] = role_el.get_text(strip=True)
+
+        # Initial hands (from the same rows)
         hand_rows = soup.find_all("div", id=re.compile(r"_Karten$"))
         for row in hand_rows:
             pname = str(row["id"]).replace("_Karten", "")
-            if pname not in game_data["players"]: game_data["players"].append(pname)
             cards = [self.encode_card(c.get("title")) for c in row.find_all("span", class_="card-image")]
             game_data["initial_hands"][pname] = cards
-            
-            # Find role for this player
-            role_el = row.find("div", class_="game-participant-role")
-            if role_el:
-                game_data["roles"][pname] = role_el.get_text(strip=True)
 
         # Meta results
         result_table = soup.find("table", class_="game-result-table")

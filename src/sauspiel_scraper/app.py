@@ -11,6 +11,7 @@ import streamlit as st
 from sauspiel_scraper.core import Database, SauspielScraper
 
 SESSION_FILE = Path("output/session.json")
+DB_FILE = Path("output/sauspiel.db")
 
 def save_session(scraper: SauspielScraper) -> None:
     SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
@@ -41,8 +42,13 @@ def process_game_data(games: list[dict[str, Any]], me: str) -> pd.DataFrame:
         outcome = meta.get("spielausgang", "").lower()
         won = "gewonnen" in outcome
         
-        # Get role from the scraped roles dict
-        role = g.get("roles", {}).get(me, "Unknown")
+        # Enhanced role logic: check 'roles' dict, fallback to title
+        roles_dict = g.get("roles", {})
+        if roles_dict and me in roles_dict:
+            role = roles_dict[me]
+        else:
+            # Fallback for old data in DB
+            role = "Spieler" if f"von {me}" in g.get("title", "") else "Gegenspieler"
         
         rows.append({
             "game_id": g.get("game_id"),
@@ -105,6 +111,7 @@ def render_analytics(df: pd.DataFrame) -> None:
 
 def main() -> None:
     st.set_page_config(page_title="Sauspiel Scraper", page_icon="🎴", layout="wide")
+    
     if "scraper" not in st.session_state: st.session_state["scraper"] = load_stored_session()
     if "db" not in st.session_state: st.session_state["db"] = Database()
 
@@ -129,6 +136,15 @@ def main() -> None:
                 st.session_state["scraper"] = None
                 if SESSION_FILE.exists(): SESSION_FILE.unlink()
                 st.rerun()
+            
+            st.divider()
+            st.header("🗑️ Data Management")
+            if st.button("Clear Database", type="secondary", width="stretch"):
+                if DB_FILE.exists():
+                    DB_FILE.unlink()
+                    st.session_state["db"] = Database()
+                    st.success("Database cleared!")
+                    st.rerun()
 
     if st.session_state["scraper"] is None:
         st.info("Please login in the sidebar.")
@@ -150,24 +166,24 @@ def main() -> None:
             val = 2000
 
     # Permanent progress placeholders
-    p_status = st.empty()
-    p_bar = st.empty()
-    p_text = st.empty()
+    p_status_area = st.empty()
+    p_bar_area = st.empty()
+    p_text_area = st.empty()
 
     if st.button("🚀 Run Scraper", type="primary", width="stretch"):
         with st.status("Checking history...") as status:
-            new_list = scraper.get_game_list_paginated(max_new=val, since=since, db=db)
+            new_list = scraper.get_game_list_paginated(max_new=int(val), since=since, db=db)
             if not new_list:
                 status.update(label="No new games found!", state="complete")
                 st.info("Everything is up to date.")
             else:
                 status.update(label=f"Found {len(new_list)} new games. Scraping...", state="running")
                 
-                pb = p_bar.progress(0)
+                pb = p_bar_area.progress(0)
                 scraped_count = 0
                 for i, info in enumerate(new_list):
                     gid = info["game_id"]
-                    p_text.markdown(f"Scraping `{gid}` ({i+1}/{len(new_list)})")
+                    p_text_area.markdown(f"Scraping `{gid}` ({i+1}/{len(new_list)})")
                     try:
                         data = scraper.scrape_game(gid, info)
                         db.save_game(gid, info.get("date", ""), data.get("game_type", ""), data)
@@ -176,7 +192,7 @@ def main() -> None:
                     pb.progress((i+1)/len(new_list))
                 
                 status.update(label=f"Done! Added {scraped_count} new games.", state="complete")
-                p_text.success(f"Added {scraped_count} new games to database.")
+                p_text_area.success(f"Added {scraped_count} new games to database.")
                 st.balloons()
 
     all_games = db.get_all_games()
