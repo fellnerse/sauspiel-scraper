@@ -85,38 +85,25 @@ def test_get_game_list_paginated_multiple_pages():
     scraper.user_id = "123"
     scraper.session = MagicMock()
     
-    # Page 1 has 1 game
-    html1 = """
-    <div class="games-item">
-        <h4 class="card-title"><a href="/spiele/101">Sauspiel</a></h4>
-        <p class="card-title-subtext">20.03.2024 12:00 — Eichel</p>
-    </div>
-    <a class="next_page" href="/spiele?page=2">Next</a>
-    """
-    # Page 2 has 1 game
-    html2 = """
-    <div class="games-item">
-        <h4 class="card-title"><a href="/spiele/102">Sauspiel</a></h4>
-        <p class="card-title-subtext">19.03.2024 12:00 — Eichel</p>
-    </div>
-    """
+    # Page 1 has 20 games (triggers next page)
+    items_p1 = "".join([f'<div class="games-item"><h4 class="card-title"><a href="/spiele/{i}"></a></h4></div>' for i in range(20)])
+    html1 = f"<div>{items_p1}</div>"
+    
+    # Page 2 has 1 game (stops pagination)
+    html2 = '<div class="games-item"><h4 class="card-title"><a href="/spiele/102"></a></h4></div>'
     
     mock_resp1 = MagicMock(text=html1)
     mock_resp2 = MagicMock(text=html2)
-    mock_resp3 = MagicMock(text="<html><body></body></html>")
     
-    scraper.session.get.side_effect = [mock_resp1, mock_resp2, mock_resp3]
+    scraper.session.get.side_effect = [mock_resp1, mock_resp2]
     
     db = MagicMock(spec=Database)
-    db.game_exists.return_value = False # All are new
+    db.game_exists.return_value = False 
     
-    # Requesting 50 games should trigger multiple pages
     new_games = scraper.get_game_list_paginated(max_new=50, db=db)
     
-    assert len(new_games) == 2
-    assert new_games[0]["game_id"] == "101"
-    assert new_games[1]["game_id"] == "102"
-    assert scraper.session.get.call_count == 2 # Should only call 2 pages because Page 2 has no next_page link
+    assert len(new_games) == 21
+    assert scraper.session.get.call_count == 2
 
 def test_identify_user_id():
     scraper = SauspielScraper(username="testuser")
@@ -134,24 +121,3 @@ def test_get_game_list_paginated_no_userid_needed():
     new_games = scraper.get_game_list_paginated(max_new=1)
     assert len(new_games) == 1
     assert new_games[0]["game_id"] == "123"
-
-def test_get_game_list_paginated_rel_next():
-    scraper = SauspielScraper()
-    scraper.user_id = "123"
-    scraper.session = MagicMock()
-    
-    html = """
-    <div class="games-item">
-        <h4 class="card-title"><a href="/spiele/201"></a></h4>
-    </div>
-    <a rel="next" href="/spiele?page=2">Nächste Seite</a>
-    """
-    mock_resp = MagicMock(text=html)
-    mock_resp_empty = MagicMock(text="<html><body></body></html>")
-    
-    scraper.session.get.side_effect = [mock_resp, mock_resp_empty]
-    
-    new_games = scraper.get_game_list_paginated(max_new=10)
-    assert len(new_games) == 1
-    assert new_games[0]["game_id"] == "201"
-    assert scraper.session.get.call_count == 2

@@ -86,7 +86,7 @@ class Database:
 
 class SauspielScraper:
     BASE_URL = "https://www.sauspiel.de"
-    LOGIN_URL = f"{BASE_URL}/login"
+    LOGIN_URL = "https://www.sauspiel.de/login"
 
     def __init__(self, username: str = "", password: str = ""):
         self.username = username
@@ -128,7 +128,7 @@ class SauspielScraper:
         token_meta = soup.find("meta", {"name": "csrf-token"})
         token = token_meta["content"] if token_meta and isinstance(token_meta, Tag) else None
         if not token:
-            resp = self.session.get(self.LOGIN_URL)
+            resp = self.session.get(f"{self.BASE_URL}/login")
             soup = BeautifulSoup(resp.text, "html.parser")
             token_input = soup.find("input", {"name": "authenticity_token"})
             token = token_input["value"] if token_input and isinstance(token_input, Tag) else None
@@ -140,7 +140,7 @@ class SauspielScraper:
             "remember_me": "1",
             "commit": "Anmelden",
         }
-        resp = self.session.post(self.LOGIN_URL, data=payload, allow_redirects=True)
+        resp = self.session.post(f"{self.BASE_URL}/login", data=payload, allow_redirects=True)
         success = "Ausloggen" in resp.text
         if success:
             self._identify_user_id(resp.text)
@@ -204,38 +204,24 @@ class SauspielScraper:
             }
 
             print(f"DEBUG: Fetching page {page} with role=all...")
-            resp = self.session.get(f"{self.BASE_URL}/spiele", params=params)
-            
-            # Save HTML for manual inspection
-            debug_path = Path("output") / f"debug_page_{page}.html"
-            debug_path.parent.mkdir(parents=True, exist_ok=True)
-            debug_path.write_text(resp.text, encoding="utf-8")
-            print(f"DEBUG: Saved HTML to {debug_path}")
-
+            # Use same-origin AJAX request style
+            headers = {
+                "Accept": "text/plain, */*; q=0.01",
+                "X-Requested-With": "XMLHttpRequest",
+                "Referer": f"{self.BASE_URL}/spiele",
+            }
+            resp = self.session.get(f"{self.BASE_URL}/spiele", params=params, headers=headers)
             soup = BeautifulSoup(resp.text, "html.parser")
-
-            # Exhaustive debug for links
-            page_links = soup.find_all("a", href=re.compile(r"page="))
-            if page_links:
-                print(f"DEBUG: Found {len(page_links)} links with 'page=' in href.")
-                for l in page_links:
-                    print(f"DEBUG: Link: {l.get('href')} | Text: {l.get_text(strip=True)}")
-
             items = soup.find_all("div", class_="games-item")
 
             if not items:
-                all_divs = soup.find_all("div")
-                print(
-                    f"DEBUG: No games-item found on page {page}. Found {len(all_divs)} total divs."
-                )
-                if len(resp.text) < 500:
-                    print(f"DEBUG: Response text: {resp.text}")
-                else:
-                    print(f"DEBUG: Response snippet: {resp.text[:500]}...")
+                print(f"DEBUG: No games-item found on page {page}.")
                 break
 
             print(f"DEBUG: Found {len(items)} items on page {page}.")
             for item in items:
+                # ... extraction logic ...
+                # (I will keep the existing extraction logic)
                 game_meta: dict[str, Any] = {}
                 subtext = item.find("p", class_="card-title-subtext")
                 if subtext:
@@ -276,21 +262,11 @@ class SauspielScraper:
                             print(f"DEBUG: Reached max_new limit {max_new}")
                             return all_found
 
-            next_link = (
-                soup.find("a", class_="next_page")
-                or soup.find("a", rel="next")
-                or soup.find("a", href=re.compile(f"page={page + 1}"))
-            )
-            if not next_link:
-                pagination = soup.find("div", class_="pagination")
-                if pagination:
-                    print(
-                        f"DEBUG: Pagination found but no next link: "
-                        f"{pagination.get_text(strip=True)}"
-                    )
-                else:
-                    print("DEBUG: No pagination div or next link found.")
+            # If we have 20 items, there is likely a next page (blind pagination)
+            if len(items) < 20:
+                print(f"DEBUG: Fewer than 20 items ({len(items)}) on page {page}, stopping.")
                 break
+
             page += 1
 
         return all_found
