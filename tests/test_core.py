@@ -134,3 +134,24 @@ def test_get_game_list_paginated_no_userid_needed():
     new_games = scraper.get_game_list_paginated(max_new=1)
     assert len(new_games) == 1
     assert new_games[0]["game_id"] == "123"
+
+def test_get_game_list_paginated_rel_next():
+    scraper = SauspielScraper()
+    scraper.user_id = "123"
+    scraper.session = MagicMock()
+    
+    html = """
+    <div class="games-item">
+        <h4 class="card-title"><a href="/spiele/201"></a></h4>
+    </div>
+    <a rel="next" href="/spiele?page=2">Nächste Seite</a>
+    """
+    mock_resp = MagicMock(text=html)
+    mock_resp_empty = MagicMock(text="<html><body></body></html>")
+    
+    scraper.session.get.side_effect = [mock_resp, mock_resp_empty]
+    
+    new_games = scraper.get_game_list_paginated(max_new=10)
+    assert len(new_games) == 1
+    assert new_games[0]["game_id"] == "201"
+    assert scraper.session.get.call_count == 2
