@@ -125,16 +125,22 @@ class SauspielScraper:
         self.username = data.get("username", "")
         self.user_id = data.get("user_id")
 
-    def get_game_list(self, limit: Optional[int] = 10, since: Optional[datetime] = None) -> list[dict[str, Any]]:
+    def get_game_list_paginated(self, max_new: int = 20, since: Optional[datetime] = None, db: Optional[Database] = None) -> list[dict[str, Any]]:
+        """Fetches game list across multiple pages until max_new new games are found or date is reached."""
         if not self.user_id: return []
-        games: list[dict[str, Any]] = []
+        
+        all_found: list[dict[str, Any]] = []
+        new_count = 0
         page = 1
+        
         while True:
             url = f"{self.BASE_URL}/spiele?player_id={self.user_id}&page={page}"
             resp = self.session.get(url)
             soup = BeautifulSoup(resp.text, "html.parser")
             items = soup.find_all("div", class_="games-item")
             if not items: break
+            
+            page_found_new = False
             for item in items:
                 game_meta: dict[str, Any] = {}
                 subtext = item.find("p", class_="card-title-subtext")
@@ -143,13 +149,15 @@ class SauspielScraper:
                     date_match = re.search(r"(\d{2}\.\d{2}\.\d{4}\s\d{2}:\d{2})", txt)
                     if date_match:
                         game_date = datetime.strptime(date_match.group(1), "%d.%m.%Y %H:%M")
-                        if since and game_date < since: return games
+                        if since and game_date < since: return all_found
                         game_meta["date"] = game_date.isoformat()
+                    
                     parts = [p.strip() for p in txt.split("—")]
                     if len(parts) >= 2:
                         game_meta["deck_type"] = parts[-1]
                         loc_part = parts[0].split(",")[-1].strip() if "," in parts[0] else None
                         if loc_part: game_meta["location"] = loc_part
+                
                 h4 = item.find("h4", class_="card-title")
                 link = h4.find("a") if h4 and isinstance(h4, Tag) else None
                 if link and isinstance(link, Tag):
@@ -157,14 +165,32 @@ class SauspielScraper:
                     match = re.search(r"/spiele/(\d+)", href)
                     if match:
                         gid = match.group(1)
-                        if gid not in [g["game_id"] for g in games]:
-                            game_meta["game_id"] = gid
-                            games.append(game_meta)
-                if limit and len(games) >= limit: return games
+                        game_meta["game_id"] = gid
+                        
+                        # Check if new
+                        is_new = True
+                        if db and db.game_exists(gid):
+                            is_new = False
+                        
+                        if is_new:
+                            new_count += 1
+                            page_found_new = True
+                            all_found.append(game_meta)
+                        else:
+                            # Even if not new, we might want to include it if we are just looking for a fixed count
+                            # But usually we want to find NEW ones.
+                            pass
+
+                if new_count >= max_new and not since:
+                    return all_found
+            
+            # If we processed a whole page and found NO new games, we might have reached the end of our "gap"
+            # However, to be safe and allow "filling holes", we only stop if no more pages exist.
             next_link = soup.find("a", class_="next_page")
             if not next_link: break
             page += 1
-        return games
+            
+        return all_found
 
     def scrape_game(self, game_id: str, list_meta: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.BASE_URL}/spiele/{game_id}"

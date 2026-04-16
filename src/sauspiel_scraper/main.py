@@ -33,8 +33,7 @@ def scrape(
             raise typer.Exit(1)
 
     with console.status("Fetching game list..."):
-        game_list = scraper.get_game_list(limit=count, since=since_dt)
-        new_games = [g for g in game_list if not db.game_exists(g["game_id"])]
+        new_games = scraper.get_game_list_paginated(max_new=count or 20, since=since_dt, db=db)
 
     if not new_games:
         console.print("[yellow]No new games to scrape.[/]")
