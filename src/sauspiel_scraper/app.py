@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import datetime
 
 import streamlit as st
@@ -14,8 +15,12 @@ def main() -> None:
 
     with st.sidebar:
         st.header("Login Settings")
-        username = st.text_input("Username", value=st.secrets.get("USERNAME", ""))
-        password = st.text_input("Password", type="password", value=st.secrets.get("PASSWORD", ""))
+        # Use os.getenv as a safe alternative to st.secrets
+        default_user = os.getenv("USERNAME", "")
+        default_pass = os.getenv("PASSWORD", "")
+        
+        username = st.text_input("Username", value=default_user)
+        password = st.text_input("Password", type="password", value=default_pass)
         
         st.divider()
         st.header("Scrape Settings")
