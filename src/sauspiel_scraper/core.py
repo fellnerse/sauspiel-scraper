@@ -261,9 +261,16 @@ class SauspielScraper:
                             print(f"DEBUG: Reached max_new limit {max_new}")
                             return all_found
 
-            next_link = soup.find("a", class_="next_page")
+            next_link = soup.find("a", class_="next_page") or soup.find("a", rel="next")
             if not next_link:
-                print("DEBUG: No next page link.")
+                pagination = soup.find("div", class_="pagination")
+                if pagination:
+                    print(
+                        f"DEBUG: Pagination found but no next link: "
+                        f"{pagination.get_text(strip=True)}"
+                    )
+                else:
+                    print("DEBUG: No pagination div or next link found.")
                 break
             page += 1
 
