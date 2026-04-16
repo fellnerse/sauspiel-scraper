@@ -202,8 +202,10 @@ class SauspielScraper:
                 "game[result]": "-1",
                 "page": page,
             }
+            if self.user_id:
+                params["player_id"] = self.user_id
 
-            print(f"DEBUG: Fetching page {page} with role=all...")
+            print(f"DEBUG: Fetching page {page} with role=all and player_id={self.user_id}...")
             # Use same-origin AJAX request style
             headers = {
                 "Accept": "text/plain, */*; q=0.01",

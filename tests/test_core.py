@@ -21,7 +21,7 @@ def test_get_game_list_paginated_params():
     
     params = kwargs.get("params", {})
     assert params["role"] == "all"
-    assert "player_id" not in params  # Verify we removed it to ensure role=all works
+    assert params["player_id"] == "123"  # Verify we re-added it
     assert params["page"] == 1
 
 def test_get_game_list_paginated_finds_new_games():

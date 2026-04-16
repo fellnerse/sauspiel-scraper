@@ -135,6 +135,15 @@ def render_analytics(df: pd.DataFrame) -> None:
             key="r_plot",
         )
 
+    st.divider()
+    st.subheader("📋 Game List (Filtered)")
+    # Show columns that are useful for sanity check
+    display_df = f_df[
+        ["game_id", "date", "type", "role", "won", "value", "laufende", "location"]
+    ].copy()
+    display_df = display_df.sort_values("date", ascending=False)
+    st.dataframe(display_df, use_container_width=True, hide_index=True)
+
 
 def main() -> None:
     st.set_page_config(page_title="Sauspiel Scraper", page_icon="🎴", layout="wide")
