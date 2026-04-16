@@ -1,9 +1,12 @@
 import json
 from datetime import datetime
+from pathlib import Path
 
 import streamlit as st
 
 from sauspiel_scraper.core import SauspielScraper
+
+SESSION_FILE = Path("output/session.json")
 
 # Initialize session state
 if "games" not in st.session_state:
@@ -11,8 +14,34 @@ if "games" not in st.session_state:
 if "scraper" not in st.session_state:
     st.session_state["scraper"] = None
 
+def save_session(scraper: SauspielScraper) -> None:
+    SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
+    with open(SESSION_FILE, "w") as f:
+        json.dump(scraper.get_session_data(), f)
+
+def load_stored_session() -> SauspielScraper | None:
+    if SESSION_FILE.exists():
+        try:
+            with open(SESSION_FILE, "r") as f:
+                data = json.load(f)
+            scraper = SauspielScraper()
+            scraper.load_session_data(data)
+            # Verify if session is still valid
+            if scraper.is_logged_in():
+                return scraper
+        except Exception:
+            pass
+    return None
+
 def main() -> None:
     st.set_page_config(page_title="Sauspiel Scraper", page_icon="🎴", layout="centered")
+    
+    # Try to auto-login on first load
+    if st.session_state["scraper"] is None:
+        stored_scraper = load_stored_session()
+        if stored_scraper:
+            st.session_state["scraper"] = stored_scraper
+
     st.title("🎴 Sauspiel Scraper")
 
     # --- Sidebar: Authentication ---
@@ -32,6 +61,7 @@ def main() -> None:
                         with st.spinner("Checking credentials..."):
                             if scraper.login():
                                 st.session_state["scraper"] = scraper
+                                save_session(scraper)
                                 st.rerun()
                             else:
                                 st.error("Login failed. Check your credentials.")
@@ -39,11 +69,14 @@ def main() -> None:
             st.success(f"Logged in as **{st.session_state['scraper'].username}**")
             if st.button("Logout", use_container_width=True):
                 st.session_state["scraper"] = None
+                if SESSION_FILE.exists():
+                    SESSION_FILE.unlink()
                 st.session_state["games"] = []
                 st.rerun()
 
-    # --- Main Area: Scraper Settings ---
+    # --- Main Area ---
     if st.session_state["scraper"] is not None:
+        scraper = st.session_state["scraper"]
         st.header("⚙️ Scraper Settings")
         
         col1, col2 = st.columns([1, 1])
@@ -60,12 +93,8 @@ def main() -> None:
                 count = None
 
         if st.button("🚀 Start Scraping", type="primary", use_container_width=True):
-            scraper = st.session_state["scraper"]
-            
-            # Reset previous results
             st.session_state["games"] = []
             
-            # 1. Fetch game list
             with st.status("Fetching game list...") as status:
                 game_list = scraper.get_game_list(limit=count, since=since_dt)
                 total = len(game_list)
@@ -75,7 +104,6 @@ def main() -> None:
                     return
                 status.update(label=f"Found {total} games. Ready to scrape.", state="complete")
 
-            # 2. Scrape details (always visible)
             st.divider()
             st.subheader("📊 Progress")
             progress_bar = st.progress(0)
@@ -98,11 +126,10 @@ def main() -> None:
             st.session_state["games"] = results
             st.balloons()
 
-    # --- Main Area: Results ---
+    # --- Results ---
     if st.session_state["games"]:
         st.divider()
         st.subheader(f"📦 Results ({len(st.session_state['games'])} games)")
-        
         jsonl_text = "\n".join([json.dumps(g, ensure_ascii=False) for g in st.session_state["games"]])
         st.text_area("JSONL Preview", value=jsonl_text, height=300)
         
@@ -119,9 +146,6 @@ def main() -> None:
             if st.button("🗑️ Clear Results", use_container_width=True):
                 st.session_state["games"] = []
                 st.rerun()
-        
-        with st.expander("🔍 Inspect Raw JSON"):
-            st.json(st.session_state["games"])
     elif st.session_state["scraper"] is None:
         st.info("Please login via the sidebar to start scraping.")
 
@@ -129,7 +153,6 @@ def run_app() -> None:
     import sys
     from streamlit.web import cli as stcli
     from pathlib import Path
-    
     app_path = Path(__file__).resolve()
     sys.argv = ["streamlit", "run", str(app_path)]
     sys.exit(stcli.main())
