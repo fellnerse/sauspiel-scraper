@@ -275,9 +275,22 @@ class SauspielScraper:
 
     def scrape_game(self, game_id: str, list_meta: dict[str, Any]) -> dict[str, Any]:
         url = f"{self.BASE_URL}/spiele/{game_id}"
-        resp = self.session.get(url)
+        resp = self.session.get(url, allow_redirects=True)
+        
+        if resp.status_code != 200:
+            raise RuntimeError(f"Failed to fetch game {game_id}: Status {resp.status_code}")
+            
+        if "Anmelden" in resp.text and "Ausloggen" not in resp.text:
+            raise RuntimeError(f"Session expired or login required for game {game_id}")
+
         soup = BeautifulSoup(resp.text, "html.parser")
         h1 = soup.find("h1")
+        if not h1:
+            # Check if it's a "not found" page
+            if "nicht gefunden" in resp.text:
+                print(f"DEBUG: Game {game_id} not found (might be deleted).")
+                return {"game_id": game_id, "error": "Not found", "meta": list_meta}
+            raise RuntimeError(f"Could not find title header for game {game_id}. HTML might be blocked.")
 
         game_data: dict[str, Any] = {
             "game_id": game_id,
