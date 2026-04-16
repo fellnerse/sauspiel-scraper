@@ -1,6 +1,7 @@
 import json
 import re
 import sqlite3
+import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any
@@ -273,30 +274,60 @@ class SauspielScraper:
 
         return all_found
 
-    def scrape_game(self, game_id: str, list_meta: dict[str, Any]) -> dict[str, Any]:
+    def scrape_game(
+        self,
+        game_id: str,
+        list_meta: dict[str, Any],
+        max_retries: int = 5,
+        log_func: Any = None,
+    ) -> dict[str, Any]:
         url = f"{self.BASE_URL}/spiele/{game_id}"
-        resp = self.session.get(url, allow_redirects=True)
-        
-        if resp.status_code != 200:
-            retry_after = resp.headers.get("Retry-After")
-            msg = f"Failed to fetch game {game_id}: Status {resp.status_code}"
-            if retry_after:
-                msg += f" (Retry-After: {retry_after})"
-            raise RuntimeError(msg)
-            
-        if "Anmelden" in resp.text and "Ausloggen" not in resp.text:
-            raise RuntimeError(f"Session expired or login required for game {game_id}")
 
-        soup = BeautifulSoup(resp.text, "html.parser")
-        h1 = soup.find("h1")
-        if not h1:
-            # Check if it's a "not found" page
-            if "nicht gefunden" in resp.text:
-                print(f"DEBUG: Game {game_id} not found (might be deleted).")
-                return {"game_id": game_id, "error": "Not found", "meta": list_meta}
-            raise RuntimeError(f"Could not find title header for game {game_id}. HTML might be blocked.")
+        attempt = 0
+        while attempt < max_retries:
+            resp = self.session.get(url, allow_redirects=True)
 
-        game_data: dict[str, Any] = {
+            if resp.status_code == 429:
+                retry_after = resp.headers.get("Retry-After")
+                wait_time = int(retry_after) + 1 if retry_after else 10
+                msg = f"Rate limited (429). Waiting {wait_time}s for game {game_id}..."
+                if log_func:
+                    log_func(msg)
+                else:
+                    print(f"DEBUG: {msg}")
+                time.sleep(wait_time)
+                continue  # Try same game again, don't increment attempt
+    
+                if resp.status_code != 200:
+                    attempt += 1
+                    if attempt >= max_retries:
+                        raise RuntimeError(f"Failed to fetch game {game_id}: Status {resp.status_code}")
+                    time.sleep(1 + attempt)
+                    continue
+    
+                if "Anmelden" in resp.text and "Ausloggen" not in resp.text:
+                    if log_func:
+                        log_func(f"Session expired for {game_id}. Re-logging in...")
+                    if not self.login():
+                        raise RuntimeError(f"Session expired and re-login failed for game {game_id}")
+                    continue
+    
+                soup = BeautifulSoup(resp.text, "html.parser")
+                h1 = soup.find("h1")
+                if not h1:
+                    if "nicht gefunden" in resp.text:
+                        return {"game_id": game_id, "error": "Not found", "meta": list_meta}
+                    attempt += 1
+                    if attempt >= max_retries:
+                        raise RuntimeError(f"Could not find title for game {game_id}. Blocked?")
+                    time.sleep(1)
+                    continue
+    
+                # Success!
+                break
+    
+            game_data: dict[str, Any] = {
+    
             "game_id": game_id,
             "url": url,
             "title": h1.get_text(strip=True) if h1 and isinstance(h1, Tag) else None,

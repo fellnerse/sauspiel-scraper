@@ -257,8 +257,12 @@ def main() -> None:
                 for i, info in enumerate(new_list):
                     gid = info["game_id"]
                     p_text_area.markdown(f"Scraping `{gid}` ({i + 1}/{len(new_list)})")
+
+                    def st_log(msg: str) -> None:
+                        st.toast(msg)
+
                     try:
-                        data = scraper.scrape_game(gid, info)
+                        data = scraper.scrape_game(gid, info, log_func=st_log)
                         db.save_game(gid, info.get("date", ""), data.get("game_type", ""), data)
                         scraped_count += 1
                     except Exception as e:
