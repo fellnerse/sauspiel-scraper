@@ -1,5 +1,4 @@
 import json
-import os
 from datetime import datetime
 
 import streamlit as st
@@ -10,39 +9,38 @@ if "games" not in st.session_state:
     st.session_state["games"] = []
 
 def main() -> None:
+    st.set_page_config(page_title="Sauspiel Scraper", page_icon="🎴")
     st.title("🎴 Sauspiel Scraper")
-    st.markdown("Download your game history from sauspiel.de for analysis.")
+    st.markdown("Archive your Sauspiel game history for analysis.")
 
     with st.sidebar:
-        st.header("Login Settings")
-        # Use os.getenv as a safe alternative to st.secrets
-        default_user = os.getenv("USERNAME", "")
-        default_pass = os.getenv("PASSWORD", "")
-        
-        username = st.text_input("Username", value=default_user)
-        password = st.text_input("Password", type="password", value=default_pass)
-        
-        st.divider()
-        st.header("Scrape Settings")
-        mode = st.radio("Mode", ["Last X Games", "Since Date"])
-        
-        count = None
-        since_dt = None
-        
-        if mode == "Last X Games":
+        with st.form("scrape_settings"):
+            st.header("Login Settings")
+            username = st.text_input("Username", value="")
+            password = st.text_input("Password", type="password", value="")
+            
+            st.divider()
+            st.header("Scrape Settings")
+            mode = st.radio("Mode", ["Last X Games", "Since Date"])
+            
             count = st.number_input("Number of games", min_value=1, max_value=500, value=10)
-        else:
             since = st.date_input("Since Date", value=datetime.now())
-            since_dt = datetime.combine(since, datetime.min.time())
+            
+            st.divider()
+            submit_button = st.form_submit_button("🚀 Start Scraping", type="primary", use_container_width=True)
 
-    if st.button("🚀 Start Scraping", type="primary"):
+    if submit_button:
         if not username or not password:
             st.error("Please provide both username and password.")
             return
 
+        since_dt = datetime.combine(since, datetime.min.time()) if mode == "Since Date" else None
+        limit = count if mode == "Last X Games" else None
+
         scraper = SauspielScraper(username, password)
         
-        with st.status("Logging in...") as status:
+        with st.status("Initializing...") as status:
+            status.update(label=f"Logging in as {username}...", state="running")
             if scraper.login():
                 status.update(label="Logged in successfully!", state="running")
             else:
@@ -51,7 +49,7 @@ def main() -> None:
                 return
 
             status.update(label="Fetching game list...", state="running")
-            game_list = scraper.get_game_list(limit=count, since=since_dt)
+            game_list = scraper.get_game_list(limit=limit, since=since_dt)
             total = len(game_list)
             
             if total == 0:
@@ -59,19 +57,20 @@ def main() -> None:
                 st.warning("No games found for your user ID.")
                 return
                 
-            status.update(label=f"Found {total} games. Starting scrape...", state="running")
+            status.update(label=f"Found {total} games. Scraping details...", state="running")
             
             progress_bar = st.progress(0)
             progress_text = st.empty()
             
             results = []
             for i, game_info in enumerate(game_list):
-                progress_text.text(f"Scraping Game {game_info['game_id']} ({i+1}/{total})")
+                gid = game_info['game_id']
+                progress_text.text(f"Scraping Game {gid} ({i+1}/{total})")
                 try:
-                    game_data = scraper.scrape_game(game_info["game_id"], game_info)
+                    game_data = scraper.scrape_game(gid, game_info)
                     results.append(game_data)
                 except Exception as e:
-                    st.error(f"Error scraping game {game_info['game_id']}: {e}")
+                    st.error(f"Error scraping game {gid}: {e}")
                 
                 progress_bar.progress((i + 1) / total)
             
@@ -84,16 +83,23 @@ def main() -> None:
         
         # Display as JSONL format
         jsonl_text = "\n".join([json.dumps(g, ensure_ascii=False) for g in st.session_state["games"]])
-        st.text_area("JSONL Output", value=jsonl_text, height=400)
+        st.text_area("JSONL Output (Preview)", value=jsonl_text, height=300)
         
-        st.download_button(
-            label="📥 Download JSONL",
-            data=jsonl_text,
-            file_name=f"sauspiel_games_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl",
-            mime="application/jsonl"
-        )
+        col1, col2 = st.columns(2)
+        with col1:
+            st.download_button(
+                label="📥 Download JSONL",
+                data=jsonl_text,
+                file_name=f"sauspiel_games_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl",
+                mime="application/jsonl",
+                use_container_width=True
+            )
+        with col2:
+            if st.button("🗑️ Clear Results", use_container_width=True):
+                st.session_state["games"] = []
+                st.rerun()
         
-        with st.expander("Raw JSON (Pretty)"):
+        with st.expander("Inspect Raw JSON"):
             st.json(st.session_state["games"])
 
 def run_app() -> None:
