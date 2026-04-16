@@ -17,7 +17,8 @@ console = Console()
 
 def scrape_with_retry(scraper: SauspielScraper, gid: str, info: dict, max_retries: int = 5):
     """Attempt to scrape a game with retries and exponential backoff."""
-    for attempt in range(max_retries):
+    attempt = 0
+    while attempt < max_retries:
         try:
             return scraper.scrape_game(gid, info)
         except RuntimeError as e:
@@ -29,24 +30,26 @@ def scrape_with_retry(scraper: SauspielScraper, gid: str, info: dict, max_retrie
                 continue
 
             if "Status 429" in err_msg:
-                # Try to extract Retry-After from message
-                wait_429 = 5 + random.random() * 5  # Default short wait
+                # Persistent waiting for rate limits
+                wait_429 = 10 + random.random() * 10  # Default fallback
                 match = re.search(r"Retry-After: (\d+)", err_msg)
                 if match:
-                    wait_429 = int(match.group(1)) + 1
-                    console.print(f"[red]Rate limited (429). Server says wait {wait_429}s...[/]")
+                    wait_429 = int(match.group(1)) + 2
+                    console.print(f"\n[bold red]Rate limited (429). Server says wait {wait_429}s. Sleeping...[/]")
                 else:
                     console.print(
-                        f"[red]Rate limited (429) at {gid}. "
+                        f"\n[red]Rate limited (429) at {gid}. "
                         f"Waiting {wait_429:.1f}s (no Retry-After header)...[/]"
                     )
                 time.sleep(wait_429)
+                # We do NOT increment attempt for 429, we just wait and try again
                 continue
 
-            if attempt < max_retries - 1:
-                wait_time = (2 ** (attempt + 1)) + random.random() * 5
+            attempt += 1
+            if attempt < max_retries:
+                wait_time = (2**attempt) + random.random() * 5
                 console.print(
-                    f"[yellow]Retry {attempt + 1}/{max_retries} for {gid} "
+                    f"[yellow]Retry {attempt}/{max_retries} for {gid} "
                     f"in {wait_time:.1f}s: {e}[/]"
                 )
                 time.sleep(wait_time)
@@ -116,15 +119,16 @@ def scrape(
             gid = info["game_id"]
             progress.update(task, description=f"Scraping {gid}")
             try:
+                # This will now wait indefinitely on 429 errors
                 data = scrape_with_retry(scraper, gid, info)
                 if data:
                     db.save_game(gid, info.get("date", ""), data.get("game_type", ""), data)
             except Exception as e:
-                console.print(f"\n[bold red]Stopping due to error for {gid}: {e}[/]")
-                # If we hit a rate limit or login failure, stop the whole process
-                if "Status 429" in str(e) or "Failed to re-login" in str(e):
-                    console.print("[bold red]Rate limit or login issue. Please wait or check credentials.[/]")
+                console.print(f"\n[bold red]Stopping due to fatal error for {gid}: {e}[/]")
+                # We only stop on truly fatal issues (like consecutive login failures)
+                if "Failed to re-login" in str(e):
                     break
+                # For other errors, we log and potentially continue (or the retry handled it)
                 continue
             
             progress.advance(task)
