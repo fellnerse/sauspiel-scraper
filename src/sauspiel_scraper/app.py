@@ -91,5 +91,14 @@ def main() -> None:
         with st.expander("Raw JSON (Pretty)"):
             st.json(st.session_state["games"])
 
+def run_app() -> None:
+    import sys
+    from streamlit.web import cli as stcli
+    from pathlib import Path
+    
+    app_path = Path(__file__).resolve()
+    sys.argv = ["streamlit", "run", str(app_path)]
+    sys.exit(stcli.main())
+
 if __name__ == "__main__":
     main()

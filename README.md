@@ -31,7 +31,7 @@ Options:
 
 Launch the Streamlit app:
 ```bash
-uv run streamlit run src/sauspiel_scraper/app.py
+uv run sauspiel-web
 ```
 
 ## Data Format
