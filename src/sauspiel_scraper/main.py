@@ -100,7 +100,9 @@ class SauspielScraper:
             resp = self.session.get(self.LOGIN_URL)
             soup = BeautifulSoup(resp.text, "html.parser")
             token_input = soup.find("input", {"name": "authenticity_token"})
-            token = token_input["value"] if token_input and isinstance(token_input, Tag) else None
+            token = (
+                token_input["value"] if token_input and isinstance(token_input, Tag) else None
+            )
 
         payload = {
             "utf8": "✓",
@@ -118,15 +120,35 @@ class SauspielScraper:
 
     def _identify_user_id(self, html: str) -> None:
         soup = BeautifulSoup(html, "html.parser")
-        me_link = soup.find("a", href=re.compile(r"^/profile/"))
+        # Try finding the specific profile link with data-username
+        me_link = soup.find("a", attrs={"data-username": self.username})
+        
+        if not me_link:
+            # Fallback: check all links for username in text
+            for a in soup.find_all("a", href=re.compile(r"^/profile/")):
+                if self.username.lower() in a.get_text().lower():
+                    me_link = a
+                    break
+
         if me_link and isinstance(me_link, Tag) and me_link.has_attr("data-userid"):
             self.user_id = str(me_link["data-userid"])
         else:
-            self.user_id = "313407"
+            # Last ditch effort: search for data-userid anywhere in the HTML near username
+            match = re.search(rf'data-userid="(\d+)"[^>]*>{self.username}', html, re.I)
+            if match:
+                self.user_id = match.group(1)
+
+        if self.user_id:
+            console.print(f"[dim]Identified User ID: {self.user_id}[/]")
+        else:
+            console.print("[bold red]Warning: Could not identify User ID. History might be empty.[/]")
 
     def get_game_list(
         self, limit: int | None = 10, since: datetime | None = None
     ) -> list[dict[str, Any]]:
+        if not self.user_id:
+            return []
+
         games: list[dict[str, Any]] = []
         page = 1
 
@@ -164,8 +186,9 @@ class SauspielScraper:
                     href = str(link.get("href", ""))
                     match = re.search(r"/spiele/(\d+)", href)
                     if match:
-                        game_meta["game_id"] = match.group(1)
-                        if game_meta["game_id"] not in [g["game_id"] for g in games]:
+                        gid = match.group(1)
+                        if gid not in [g["game_id"] for g in games]:
+                            game_meta["game_id"] = gid
                             games.append(game_meta)
 
                 if limit and len(games) >= limit:
@@ -249,11 +272,13 @@ class SauspielScraper:
                 p_name = p_link.get_text(strip=True) if p_link else None
                 c_span = ce.find("span", class_="card-image")
                 c_title = c_span.get("title") if c_span and isinstance(c_span, Tag) else None
-                
-                p_idx = game_data["players"].index(p_name) if p_name in game_data["players"] else "?"
+
+                p_idx = (
+                    game_data["players"].index(p_name) if p_name in game_data["players"] else "?"
+                )
                 c_code = self.encode_card(c_title) or "?"
                 trick_data["cards"].append(f"{p_idx}:{c_code}")
-                
+
             game_data["tricks"].append(trick_data)
 
         return game_data
@@ -316,7 +341,7 @@ def scrape(
         game_list = scraper.get_game_list(limit=count, since=since_dt)
 
     if not game_list:
-        console.print("[yellow]No games found.[/]")
+        console.print("[yellow]No games found for your user ID.[/]")
         return
 
     console.print(f"[bold green]Found {len(game_list)} games. Starting scrape...[/]")
@@ -330,15 +355,14 @@ def scrape(
         console=console,
     ) as progress:
         task = progress.add_task("[cyan]Scraping...", total=len(game_list))
-        
-        # Open file if not in pretty mode
+
         f = None if pretty else open(output, "w", encoding="utf-8")
-        
+
         try:
             for game_info in game_list:
                 gid = game_info["game_id"]
                 progress.update(task, description=f"[cyan]Scraping Game {gid}...")
-                
+
                 try:
                     game_data = scraper.scrape_game(gid, game_info)
                     if pretty:
@@ -347,10 +371,10 @@ def scrape(
                         assert f is not None
                         f.write(json.dumps(game_data, ensure_ascii=False) + "\n")
                         f.flush()
-                    
+
                 except Exception as e:
                     console.print(f"[red]Error scraping game {gid}: {e}[/]")
-                
+
                 progress.advance(task)
                 time.sleep(0.5)
         finally:
@@ -366,9 +390,9 @@ def scrape(
     table.add_column("Output File", style="magenta")
     table.add_column("Format", style="green")
     table.add_row(
-        str(len(results) if pretty else len(game_list)), 
-        str(output), 
-        "JSON (Pretty)" if pretty else "JSONL"
+        str(len(results) if pretty else len(game_list)),
+        str(output),
+        "JSON (Pretty)" if pretty else "JSONL",
     )
     console.print(table)
 
