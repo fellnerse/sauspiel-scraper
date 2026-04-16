@@ -182,9 +182,6 @@ class SauspielScraper:
     def get_game_list_paginated(
         self, max_new: int = 20, since: datetime | None = None, db: Database | None = None
     ) -> list[dict[str, Any]]:
-        if not self.user_id:
-            return []
-
         all_found: list[dict[str, Any]] = []
         new_count = 0
         page = 1
