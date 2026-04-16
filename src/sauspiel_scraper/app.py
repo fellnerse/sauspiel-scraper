@@ -58,16 +58,25 @@ def process_game_data(games: list[dict[str, Any]], me: str) -> pd.DataFrame:
             # Fallback for old data in DB
             role = "Spieler" if f"von {me}" in g.get("title", "") else "Gegenspieler"
 
-        rows.append({
-            "game_id": g.get("game_id"),
-            "date": pd.to_datetime(meta.get("date")),
-            "type": g.get("game_type", "Unknown"),
-            "won": won,
-            "value": val if won else -val,
-            "role": role,
-            "laufende": int(meta.get("laufende", "0")),
-            "location": meta.get("location", "Unknown"),
-        })
+        raw_laufende = meta.get("laufende", "0")
+        laufende = 0
+        try:
+            laufende = int(re.sub(r"[^\d]", "", raw_laufende))
+        except Exception:
+            pass
+
+        rows.append(
+            {
+                "game_id": g.get("game_id"),
+                "date": pd.to_datetime(meta.get("date")),
+                "type": g.get("game_type", "Unknown"),
+                "won": won,
+                "value": val if won else -val,
+                "role": role,
+                "laufende": laufende,
+                "location": meta.get("location", "Unknown"),
+            }
+        )
     df = pd.DataFrame(rows)
     if not df.empty:
         df = df.sort_values("date")
@@ -205,7 +214,7 @@ def main() -> None:
                 scraped_count = 0
                 for i, info in enumerate(new_list):
                     gid = info["game_id"]
-                    p_text_area.markdown(f"Scraping `{gid}` ({i+1}/{len(new_list)})")
+                    p_text_area.markdown(f"Scraping `{gid}` ({i + 1}/{len(new_list)})")
                     try:
                         data = scraper.scrape_game(gid, info)
                         db.save_game(gid, info.get("date", ""), data.get("game_type", ""), data)
