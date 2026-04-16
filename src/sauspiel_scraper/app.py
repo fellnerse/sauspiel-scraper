@@ -135,7 +135,9 @@ def render_analytics(df: pd.DataFrame) -> None:
     with ca:
         st.plotly_chart(px.pie(f_df, names="type", title="Game Types", hole=0.4), key="t_plot")
     with cb:
-        st.plotly_chart(px.pie(f_df, names="role", title="Role Distribution", hole=0.4), key="r_pie")
+        st.plotly_chart(
+            px.pie(f_df, names="role", title="Role Distribution", hole=0.4), key="r_pie"
+        )
 
     r_stats = f_df.groupby("role")["won"].mean().reset_index()
     r_stats["won"] *= 100
@@ -164,6 +166,14 @@ def main() -> None:
     if "db" not in st.session_state:
         st.session_state["db"] = Database()
 
+    scraper, db = st.session_state["scraper"], st.session_state["db"]
+    all_games = db.get_all_games()
+    df = (
+        process_game_data(all_games, scraper.username)
+        if all_games and scraper
+        else pd.DataFrame()
+    )
+
     st.title("🎴 Sauspiel Scraper & Analytics")
 
     with st.sidebar:
@@ -188,6 +198,17 @@ def main() -> None:
                     SESSION_FILE.unlink()
                 st.rerun()
 
+            if not df.empty:
+                st.divider()
+                st.header("📥 Export")
+                jsonl_data = df.to_json(orient="records", lines=True, date_format="iso")
+                st.download_button(
+                    label="Download All Data (JSONL)",
+                    data=jsonl_data,
+                    file_name=f"sauspiel_export_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jsonl",
+                    mime="application/x-jsonlines",
+                )
+
             st.divider()
             st.header("🗑️ Data Management")
             if st.button("Clear Database", type="secondary", width="stretch"):
@@ -200,8 +221,6 @@ def main() -> None:
     if st.session_state["scraper"] is None:
         st.info("Please login in the sidebar.")
         return
-
-    scraper, db = st.session_state["scraper"], st.session_state["db"]
 
     st.header("⚙️ Fetch New Games")
     c1, c2 = st.columns(2)

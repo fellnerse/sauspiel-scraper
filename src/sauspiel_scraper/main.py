@@ -7,10 +7,30 @@ import typer
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 
+from sauspiel_scraper.app import process_game_data
 from sauspiel_scraper.core import Database, SauspielScraper
 
 app = typer.Typer(help="Sauspiel Game Scraper CLI")
 console = Console()
+
+
+@app.command()
+def export(
+    username: Annotated[str, typer.Option("--username", "-u", envvar="USERNAME", prompt=True)],
+    db_path: Annotated[Path, typer.Option("--db")] = Path("output/sauspiel.db"),
+    output_path: Annotated[Path, typer.Option("--output", "-o")] = Path("output/export.jsonl"),
+) -> None:
+    """Export games from database to JSONL format."""
+    db = Database(db_path)
+    games = db.get_all_games()
+    if not games:
+        console.print("[yellow]No games found in database.[/]")
+        return
+
+    df = process_game_data(games, username)
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    df.to_json(output_path, orient="records", lines=True, date_format="iso")
+    console.print(f"[green]Exported {len(df)} games to {output_path}[/]")
 
 
 @app.command()
