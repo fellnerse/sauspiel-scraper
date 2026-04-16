@@ -105,12 +105,15 @@ class SauspielScraper:
         if not self.username:
             user_el = soup.find("span", class_="topbar-username-mobile")
             if user_el: self.username = user_el.get_text().strip()
+        
+        # Explicit search for our own username to get the ID
         me_link = soup.find("a", attrs={"data-username": self.username})
         if not me_link:
             for a in soup.find_all("a", href=re.compile(r"^/profile/")):
                 if self.username.lower() in a.get_text().lower():
                     me_link = a
                     break
+        
         if me_link and isinstance(me_link, Tag) and me_link.has_attr("data-userid"):
             self.user_id = str(me_link["data-userid"])
         else:
@@ -126,7 +129,6 @@ class SauspielScraper:
         self.user_id = data.get("user_id")
 
     def get_game_list_paginated(self, max_new: int = 20, since: Optional[datetime] = None, db: Optional[Database] = None) -> list[dict[str, Any]]:
-        """Fetches game list across multiple pages until max_new new games are found or date is reached."""
         if not self.user_id: return []
         
         all_found: list[dict[str, Any]] = []
@@ -138,9 +140,9 @@ class SauspielScraper:
             resp = self.session.get(url)
             soup = BeautifulSoup(resp.text, "html.parser")
             items = soup.find_all("div", class_="games-item")
+            
             if not items: break
             
-            page_found_new = False
             for item in items:
                 game_meta: dict[str, Any] = {}
                 subtext = item.find("p", class_="card-title-subtext")
@@ -167,25 +169,13 @@ class SauspielScraper:
                         gid = match.group(1)
                         game_meta["game_id"] = gid
                         
-                        # Check if new
-                        is_new = True
-                        if db and db.game_exists(gid):
-                            is_new = False
-                        
-                        if is_new:
+                        if not db or not db.game_exists(gid):
                             new_count += 1
-                            page_found_new = True
                             all_found.append(game_meta)
-                        else:
-                            # Even if not new, we might want to include it if we are just looking for a fixed count
-                            # But usually we want to find NEW ones.
-                            pass
-
-                if new_count >= max_new and not since:
-                    return all_found
+                        
+                        if new_count >= max_new and not since:
+                            return all_found
             
-            # If we processed a whole page and found NO new games, we might have reached the end of our "gap"
-            # However, to be safe and allow "filling holes", we only stop if no more pages exist.
             next_link = soup.find("a", class_="next_page")
             if not next_link: break
             page += 1
@@ -197,18 +187,29 @@ class SauspielScraper:
         resp = self.session.get(url)
         soup = BeautifulSoup(resp.text, "html.parser")
         h1 = soup.find("h1")
+        
         game_data: dict[str, Any] = {
             "game_id": game_id, "url": url,
             "title": h1.get_text(strip=True) if h1 and isinstance(h1, Tag) else None,
-            "players": [], "klopfer": [], "initial_hands": {}, "tricks": [], "meta": list_meta.copy(),
+            "players": [], "roles": {}, "klopfer": [], "initial_hands": {}, "tricks": [], "meta": list_meta.copy(),
         }
+        
         if game_data["title"]: game_data["game_type"] = game_data["title"].split()[0]
+        
+        # Extract players and roles from hand rows
         hand_rows = soup.find_all("div", id=re.compile(r"_Karten$"))
         for row in hand_rows:
             pname = str(row["id"]).replace("_Karten", "")
             if pname not in game_data["players"]: game_data["players"].append(pname)
             cards = [self.encode_card(c.get("title")) for c in row.find_all("span", class_="card-image")]
             game_data["initial_hands"][pname] = cards
+            
+            # Find role for this player
+            role_el = row.find("div", class_="game-participant-role")
+            if role_el:
+                game_data["roles"][pname] = role_el.get_text(strip=True)
+
+        # Meta results
         result_table = soup.find("table", class_="game-result-table")
         if result_table and isinstance(result_table, Tag):
             for tr in result_table.find_all("tr"):
@@ -217,15 +218,19 @@ class SauspielScraper:
                     key = th.get_text(strip=True).lower().replace(" ", "_")
                     if key == "klopfer": game_data["klopfer"] = [a.get_text(strip=True) for a in td.find_all("a")]
                     else: game_data["meta"][key] = td.get_text(strip=True)
+        
+        # Tricks
         trick_headers = soup.find_all("h4", class_="card-title")
         for header in trick_headers:
             header_text = header.get_text(strip=True)
             if not re.search(r"\d+\. Stich", header_text): continue
             card_div = header.find_parent("div", class_="card")
             if not card_div: continue
+            
             winner_div = card_div.find("div", class_="game-participant-avatar")
             winner_a = winner_div.find("a") if winner_div and isinstance(winner_div, Tag) else None
             winner_name = str(winner_a["data-username"]) if winner_a and isinstance(winner_a, Tag) else None
+            
             trick_data: dict[str, Any] = {
                 "winner": (game_data["players"].index(winner_name) if winner_name in game_data["players"] else None),
                 "cards": [],
@@ -239,4 +244,5 @@ class SauspielScraper:
                 c_code = self.encode_card(c_title) or "?"
                 trick_data["cards"].append(f"{p_idx}:{c_code}")
             game_data["tricks"].append(trick_data)
+            
         return game_data

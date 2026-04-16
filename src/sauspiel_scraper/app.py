@@ -37,9 +37,13 @@ def process_game_data(games: list[dict[str, Any]], me: str) -> pd.DataFrame:
         val = 0
         try: val = int(re.sub(r"[^\d-]", "", raw_val))
         except Exception: pass
+        
         outcome = meta.get("spielausgang", "").lower()
         won = "gewonnen" in outcome
-        role = "Spieler" if f"von {me}" in g.get("title", "") else "Gegenspieler"
+        
+        # Get role from the scraped roles dict
+        role = g.get("roles", {}).get(me, "Unknown")
+        
         rows.append({
             "game_id": g.get("game_id"),
             "date": pd.to_datetime(meta.get("date")),
@@ -64,9 +68,11 @@ def render_analytics(df: pd.DataFrame) -> None:
         with c1:
             date_range = st.date_input("Date Range", value=(df["date"].min().date(), df["date"].max().date()))
         with c2:
-            roles = st.multiselect("Roles", options=["Spieler", "Gegenspieler"], default=["Spieler", "Gegenspieler"])
+            role_options = sorted(df["role"].unique().tolist())
+            roles = st.multiselect("Roles", options=role_options, default=role_options)
         with c3:
-            types = st.multiselect("Game Types", options=df["type"].unique(), default=list(df["type"].unique()))
+            type_options = sorted(df["type"].unique().tolist())
+            types = st.multiselect("Game Types", options=type_options, default=type_options)
 
     # Apply filters
     mask = (df["role"].isin(roles)) & (df["type"].isin(types))
@@ -87,15 +93,15 @@ def render_analytics(df: pd.DataFrame) -> None:
     m3.metric("Profit/Loss", f"P {f_df['value'].sum():+d}")
 
     st.divider()
-    st.plotly_chart(px.line(f_df, x="date", y="cumulative_profit", title="Profit Curve"), key="p_plot", width="stretch")
+    st.plotly_chart(px.line(f_df, x="date", y="cumulative_profit", title="Profit Curve"), key="p_plot")
 
     ca, cb = st.columns(2)
     with ca:
-        st.plotly_chart(px.pie(f_df, names="type", title="Game Types", hole=0.4), key="t_plot", width="stretch")
+        st.plotly_chart(px.pie(f_df, names="type", title="Game Types", hole=0.4), key="t_plot")
     with cb:
         r_stats = f_df.groupby("role")["won"].mean().reset_index()
         r_stats["won"] *= 100
-        st.plotly_chart(px.bar(r_stats, x="role", y="won", color="role", title="Win Rate by Role (%)"), key="r_plot", width="stretch")
+        st.plotly_chart(px.bar(r_stats, x="role", y="won", color="role", title="Win Rate by Role (%)"), key="r_plot")
 
 def main() -> None:
     st.set_page_config(page_title="Sauspiel Scraper", page_icon="🎴", layout="wide")
@@ -112,12 +118,11 @@ def main() -> None:
                 p = st.text_input("Password", type="password")
                 if st.form_submit_button("Login", type="primary", width="stretch"):
                     s = SauspielScraper(u, p)
-                    with st.spinner("Logging in..."):
-                        if s.login():
-                            st.session_state["scraper"] = s
-                            save_session(s)
-                            st.rerun()
-                        else: st.error("Login failed.")
+                    if s.login():
+                        st.session_state["scraper"] = s
+                        save_session(s)
+                        st.rerun()
+                    else: st.error("Login failed.")
         else:
             st.success(f"Logged in: **{st.session_state['scraper'].username}**")
             if st.button("Logout", width="stretch"):
@@ -142,32 +147,37 @@ def main() -> None:
         else:
             dt = st.date_input("Date")
             since = datetime.combine(dt, datetime.min.time())
-            val = 2000 # High limit for date mode
+            val = 2000
+
+    # Permanent progress placeholders
+    p_status = st.empty()
+    p_bar = st.empty()
+    p_text = st.empty()
 
     if st.button("🚀 Run Scraper", type="primary", width="stretch"):
-        with st.spinner("Checking history..."):
-            new_list = scraper.get_game_list_paginated(max_new=val if since is None else 2000, since=since, db=db)
-        
-        if not new_list:
-            st.info("No new games found!")
-        else:
-            st.subheader("📊 Scraping Progress")
-            pbar = st.progress(0)
-            ptext = st.empty()
-            
-            scraped_count = 0
-            for i, info in enumerate(new_list):
-                gid = info["game_id"]
-                ptext.markdown(f"Scraping `{gid}` ({i+1}/{len(new_list)})")
-                try:
-                    data = scraper.scrape_game(gid, info)
-                    db.save_game(gid, info.get("date", ""), data.get("game_type", ""), data)
-                    scraped_count += 1
-                except Exception as e: st.error(f"Error {gid}: {e}")
-                pbar.progress((i+1)/len(new_list))
-            
-            ptext.success(f"Added {scraped_count} new games to database.")
-            st.balloons()
+        with st.status("Checking history...") as status:
+            new_list = scraper.get_game_list_paginated(max_new=val, since=since, db=db)
+            if not new_list:
+                status.update(label="No new games found!", state="complete")
+                st.info("Everything is up to date.")
+            else:
+                status.update(label=f"Found {len(new_list)} new games. Scraping...", state="running")
+                
+                pb = p_bar.progress(0)
+                scraped_count = 0
+                for i, info in enumerate(new_list):
+                    gid = info["game_id"]
+                    p_text.markdown(f"Scraping `{gid}` ({i+1}/{len(new_list)})")
+                    try:
+                        data = scraper.scrape_game(gid, info)
+                        db.save_game(gid, info.get("date", ""), data.get("game_type", ""), data)
+                        scraped_count += 1
+                    except Exception as e: st.error(f"Error {gid}: {e}")
+                    pb.progress((i+1)/len(new_list))
+                
+                status.update(label=f"Done! Added {scraped_count} new games.", state="complete")
+                p_text.success(f"Added {scraped_count} new games to database.")
+                st.balloons()
 
     all_games = db.get_all_games()
     if all_games:
