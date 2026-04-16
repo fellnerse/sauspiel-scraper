@@ -27,10 +27,12 @@ def export(
         console.print("[yellow]No games found in database.[/]")
         return
 
-    df = process_game_data(games, username)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    df.to_json(output_path, orient="records", lines=True, date_format="iso")
-    console.print(f"[green]Exported {len(df)} games to {output_path}[/]")
+    with open(output_path, "w", encoding="utf-8") as f:
+        for game in games:
+            f.write(json.dumps(game, ensure_ascii=False) + "\n")
+    
+    console.print(f"[green]Exported {len(games)} raw game records to {output_path}[/]")
 
 
 @app.command()

@@ -198,10 +198,12 @@ def main() -> None:
                     SESSION_FILE.unlink()
                 st.rerun()
 
-            if not df.empty:
+            if all_games:
                 st.divider()
                 st.header("📥 Export")
-                jsonl_data = df.to_json(orient="records", lines=True, date_format="iso")
+                jsonl_data = "\n".join(
+                    [json.dumps(g, ensure_ascii=False) for g in all_games]
+                )
                 st.download_button(
                     label="Download All Data (JSONL)",
                     data=jsonl_data,
