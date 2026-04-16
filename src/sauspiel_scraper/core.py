@@ -211,7 +211,15 @@ class SauspielScraper:
             items = soup.find_all("div", class_="games-item")
 
             if not items:
-                print(f"DEBUG: No games-item found on page {page}.")
+                all_divs = soup.find_all("div")
+                print(
+                    f"DEBUG: No games-item found on page {page}. "
+                    f"Found {len(all_divs)} total divs."
+                )
+                if len(resp.text) < 500:
+                    print(f"DEBUG: Response text: {resp.text}")
+                else:
+                    print(f"DEBUG: Response snippet: {resp.text[:500]}...")
                 break
 
             print(f"DEBUG: Found {len(items)} items on page {page}.")

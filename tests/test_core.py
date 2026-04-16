@@ -79,3 +79,41 @@ def test_get_game_list_paginated_skips_existing():
     
     assert len(new_games) == 0
     db.game_exists.assert_called_with("888888")
+
+def test_get_game_list_paginated_multiple_pages():
+    scraper = SauspielScraper()
+    scraper.user_id = "123"
+    scraper.session = MagicMock()
+    
+    # Page 1 has 1 game
+    html1 = """
+    <div class="games-item">
+        <h4 class="card-title"><a href="/spiele/101">Sauspiel</a></h4>
+        <p class="card-title-subtext">20.03.2024 12:00 — Eichel</p>
+    </div>
+    <a class="next_page" href="/spiele?page=2">Next</a>
+    """
+    # Page 2 has 1 game
+    html2 = """
+    <div class="games-item">
+        <h4 class="card-title"><a href="/spiele/102">Sauspiel</a></h4>
+        <p class="card-title-subtext">19.03.2024 12:00 — Eichel</p>
+    </div>
+    """
+    
+    mock_resp1 = MagicMock(text=html1)
+    mock_resp2 = MagicMock(text=html2)
+    mock_resp3 = MagicMock(text="<html><body></body></html>")
+    
+    scraper.session.get.side_effect = [mock_resp1, mock_resp2, mock_resp3]
+    
+    db = MagicMock(spec=Database)
+    db.game_exists.return_value = False # All are new
+    
+    # Requesting 50 games should trigger multiple pages
+    new_games = scraper.get_game_list_paginated(max_new=50, db=db)
+    
+    assert len(new_games) == 2
+    assert new_games[0]["game_id"] == "101"
+    assert new_games[1]["game_id"] == "102"
+    assert scraper.session.get.call_count == 2 # Should only call 2 pages because Page 2 has no next_page link
