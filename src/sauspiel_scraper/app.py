@@ -13,35 +13,43 @@ from sauspiel_scraper.core import Database, SauspielScraper
 SESSION_FILE = Path("output/session.json")
 DB_FILE = Path("output/sauspiel.db")
 
+
 def save_session(scraper: SauspielScraper) -> None:
     SESSION_FILE.parent.mkdir(parents=True, exist_ok=True)
     with open(SESSION_FILE, "w") as f:
         json.dump(scraper.get_session_data(), f)
 
+
 def load_stored_session() -> SauspielScraper | None:
     if SESSION_FILE.exists():
         try:
-            with open(SESSION_FILE, "r") as f:
+            with open(SESSION_FILE) as f:
                 data = json.load(f)
             scraper = SauspielScraper()
             scraper.load_session_data(data)
-            if scraper.is_logged_in(): return scraper
-        except Exception: pass
+            if scraper.is_logged_in():
+                return scraper
+        except Exception:
+            pass
     return None
 
+
 def process_game_data(games: list[dict[str, Any]], me: str) -> pd.DataFrame:
-    if not games: return pd.DataFrame()
+    if not games:
+        return pd.DataFrame()
     rows = []
     for g in games:
         meta = g.get("meta", {})
         raw_val = meta.get("wert", "0")
         val = 0
-        try: val = int(re.sub(r"[^\d-]", "", raw_val))
-        except Exception: pass
-        
+        try:
+            val = int(re.sub(r"[^\d-]", "", raw_val))
+        except Exception:
+            pass
+
         outcome = meta.get("spielausgang", "").lower()
         won = "gewonnen" in outcome
-        
+
         # Enhanced role logic: check 'roles' dict, fallback to title
         roles_dict = g.get("roles", {})
         if roles_dict and me in roles_dict:
@@ -49,7 +57,7 @@ def process_game_data(games: list[dict[str, Any]], me: str) -> pd.DataFrame:
         else:
             # Fallback for old data in DB
             role = "Spieler" if f"von {me}" in g.get("title", "") else "Gegenspieler"
-        
+
         rows.append({
             "game_id": g.get("game_id"),
             "date": pd.to_datetime(meta.get("date")),
@@ -66,13 +74,16 @@ def process_game_data(games: list[dict[str, Any]], me: str) -> pd.DataFrame:
         df["cumulative_profit"] = df["value"].cumsum()
     return df
 
+
 def render_analytics(df: pd.DataFrame) -> None:
     st.header("📈 Analytics")
-    
+
     with st.expander("🔍 Filter & Settings", expanded=False):
         c1, c2, c3 = st.columns(3)
         with c1:
-            date_range = st.date_input("Date Range", value=(df["date"].min().date(), df["date"].max().date()))
+            date_range = st.date_input(
+                "Date Range", value=(df["date"].min().date(), df["date"].max().date())
+            )
         with c2:
             role_options = sorted(df["role"].unique().tolist())
             roles = st.multiselect("Roles", options=role_options, default=role_options)
@@ -85,21 +96,23 @@ def render_analytics(df: pd.DataFrame) -> None:
     dr_list = list(date_range) if isinstance(date_range, (list, tuple)) else []
     if len(dr_list) == 2:
         mask &= (df["date"].dt.date >= dr_list[0]) & (df["date"].dt.date <= dr_list[1])
-    
+
     f_df = df[mask].copy()
     if f_df.empty:
         st.warning("No data matches selected filters.")
         return
 
     f_df["cumulative_profit"] = f_df["value"].cumsum()
-    
+
     m1, m2, m3 = st.columns(3)
     m1.metric("Total Games", len(f_df))
     m2.metric("Win Rate", f"{(f_df['won'].mean() * 100):.1f}%")
     m3.metric("Profit/Loss", f"P {f_df['value'].sum():+d}")
 
     st.divider()
-    st.plotly_chart(px.line(f_df, x="date", y="cumulative_profit", title="Profit Curve"), key="p_plot")
+    st.plotly_chart(
+        px.line(f_df, x="date", y="cumulative_profit", title="Profit Curve"), key="p_plot"
+    )
 
     ca, cb = st.columns(2)
     with ca:
@@ -107,13 +120,19 @@ def render_analytics(df: pd.DataFrame) -> None:
     with cb:
         r_stats = f_df.groupby("role")["won"].mean().reset_index()
         r_stats["won"] *= 100
-        st.plotly_chart(px.bar(r_stats, x="role", y="won", color="role", title="Win Rate by Role (%)"), key="r_plot")
+        st.plotly_chart(
+            px.bar(r_stats, x="role", y="won", color="role", title="Win Rate by Role (%)"),
+            key="r_plot",
+        )
+
 
 def main() -> None:
     st.set_page_config(page_title="Sauspiel Scraper", page_icon="🎴", layout="wide")
-    
-    if "scraper" not in st.session_state: st.session_state["scraper"] = load_stored_session()
-    if "db" not in st.session_state: st.session_state["db"] = Database()
+
+    if "scraper" not in st.session_state:
+        st.session_state["scraper"] = load_stored_session()
+    if "db" not in st.session_state:
+        st.session_state["db"] = Database()
 
     st.title("🎴 Sauspiel Scraper & Analytics")
 
@@ -129,14 +148,16 @@ def main() -> None:
                         st.session_state["scraper"] = s
                         save_session(s)
                         st.rerun()
-                    else: st.error("Login failed.")
+                    else:
+                        st.error("Login failed.")
         else:
             st.success(f"Logged in: **{st.session_state['scraper'].username}**")
             if st.button("Logout", width="stretch"):
                 st.session_state["scraper"] = None
-                if SESSION_FILE.exists(): SESSION_FILE.unlink()
+                if SESSION_FILE.exists():
+                    SESSION_FILE.unlink()
                 st.rerun()
-            
+
             st.divider()
             st.header("🗑️ Data Management")
             if st.button("Clear Database", type="secondary", width="stretch"):
@@ -166,7 +187,6 @@ def main() -> None:
             val = 2000
 
     # Permanent progress placeholders
-    p_status_area = st.empty()
     p_bar_area = st.empty()
     p_text_area = st.empty()
 
@@ -177,8 +197,10 @@ def main() -> None:
                 status.update(label="No new games found!", state="complete")
                 st.info("Everything is up to date.")
             else:
-                status.update(label=f"Found {len(new_list)} new games. Scraping...", state="running")
-                
+                status.update(
+                    label=f"Found {len(new_list)} new games. Scraping...", state="running"
+                )
+
                 pb = p_bar_area.progress(0)
                 scraped_count = 0
                 for i, info in enumerate(new_list):
@@ -188,9 +210,10 @@ def main() -> None:
                         data = scraper.scrape_game(gid, info)
                         db.save_game(gid, info.get("date", ""), data.get("game_type", ""), data)
                         scraped_count += 1
-                    except Exception as e: st.error(f"Error {gid}: {e}")
-                    pb.progress((i+1)/len(new_list))
-                
+                    except Exception as e:
+                        st.error(f"Error {gid}: {e}")
+                    pb.progress((i + 1) / len(new_list))
+
                 status.update(label=f"Done! Added {scraped_count} new games.", state="complete")
                 p_text_area.success(f"Added {scraped_count} new games to database.")
                 st.balloons()
@@ -200,14 +223,19 @@ def main() -> None:
         df = process_game_data(all_games, scraper.username)
         st.divider()
         render_analytics(df)
-    else: st.info("Database empty.")
+    else:
+        st.info("Database empty.")
+
 
 def run_app() -> None:
     import sys
+
     from streamlit.web import cli as stcli
+
     app_path = Path(__file__).resolve()
     sys.argv = ["streamlit", "run", str(app_path)]
     sys.exit(stcli.main())
+
 
 if __name__ == "__main__":
     main()
