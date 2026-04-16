@@ -29,12 +29,17 @@ def scrape_with_retry(scraper: SauspielScraper, gid: str, info: dict, max_retrie
                 continue
 
             if "Status 429" in err_msg:
-                # Specific handling for rate limiting
-                wait_429 = 30 + random.random() * 30
-                console.print(
-                    f"[red]Rate limited (429) at {gid}. "
-                    f"Waiting {wait_429:.1f}s before retry {attempt + 1}/{max_retries}...[/]"
-                )
+                # Try to extract Retry-After from message
+                wait_429 = 5 + random.random() * 5  # Default short wait
+                match = re.search(r"Retry-After: (\d+)", err_msg)
+                if match:
+                    wait_429 = int(match.group(1)) + 1
+                    console.print(f"[red]Rate limited (429). Server says wait {wait_429}s...[/]")
+                else:
+                    console.print(
+                        f"[red]Rate limited (429) at {gid}. "
+                        f"Waiting {wait_429:.1f}s (no Retry-After header)...[/]"
+                    )
                 time.sleep(wait_429)
                 continue
 
@@ -121,8 +126,8 @@ def scrape(
                     break
             
             progress.advance(task)
-            # More conservative delay: 2.0 to 4.0 seconds
-            time.sleep(2.0 + random.random() * 2.0)
+            # Faster delay: 0.75 to 1.5 seconds
+            time.sleep(0.75 + random.random() * 0.75)
 
     console.print(f"[green]Done! Database updated: {db_path}[/]")
 

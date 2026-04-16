@@ -278,7 +278,11 @@ class SauspielScraper:
         resp = self.session.get(url, allow_redirects=True)
         
         if resp.status_code != 200:
-            raise RuntimeError(f"Failed to fetch game {game_id}: Status {resp.status_code}")
+            retry_after = resp.headers.get("Retry-After")
+            msg = f"Failed to fetch game {game_id}: Status {resp.status_code}"
+            if retry_after:
+                msg += f" (Retry-After: {retry_after})"
+            raise RuntimeError(msg)
             
         if "Anmelden" in resp.text and "Ausloggen" not in resp.text:
             raise RuntimeError(f"Session expired or login required for game {game_id}")
