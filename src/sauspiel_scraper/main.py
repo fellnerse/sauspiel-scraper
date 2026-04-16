@@ -120,10 +120,12 @@ def scrape(
                 if data:
                     db.save_game(gid, info.get("date", ""), data.get("game_type", ""), data)
             except Exception as e:
-                console.print(f"[red]Fatal error for {gid}: {e}[/]")
-                # If it's a fatal error (like consecutive login failures), we stop
-                if "Failed to re-login" in str(e):
+                console.print(f"\n[bold red]Stopping due to error for {gid}: {e}[/]")
+                # If we hit a rate limit or login failure, stop the whole process
+                if "Status 429" in str(e) or "Failed to re-login" in str(e):
+                    console.print("[bold red]Rate limit or login issue. Please wait or check credentials.[/]")
                     break
+                continue
             
             progress.advance(task)
             # Faster delay: 0.75 to 1.5 seconds
