@@ -205,6 +205,13 @@ class SauspielScraper:
 
             print(f"DEBUG: Fetching page {page} with role=all...")
             resp = self.session.get(f"{self.BASE_URL}/spiele", params=params)
+            
+            # Save HTML for manual inspection
+            debug_path = Path("output") / f"debug_page_{page}.html"
+            debug_path.parent.mkdir(parents=True, exist_ok=True)
+            debug_path.write_text(resp.text, encoding="utf-8")
+            print(f"DEBUG: Saved HTML to {debug_path}")
+
             soup = BeautifulSoup(resp.text, "html.parser")
 
             # Exhaustive debug for links
