@@ -12,6 +12,7 @@ def test_parse_overview_page():
     
     mock_resp = MagicMock()
     mock_resp.text = html
+    mock_resp.status_code = 200
     scraper.session.get.return_value = mock_resp
     
     # We don't want it to keep going to page 2 in this test
@@ -37,6 +38,7 @@ def test_parse_detail_page():
     
     mock_resp = MagicMock()
     mock_resp.text = html
+    mock_resp.status_code = 200
     scraper.session.get.return_value = mock_resp
     
     # Using real meta info from overview fixture
