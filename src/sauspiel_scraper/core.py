@@ -1,4 +1,5 @@
 import json
+import random
 import re
 import sqlite3
 import time
@@ -93,16 +94,35 @@ class SauspielScraper:
         self.username = username
         self.password = password
         self.session = requests.Session()
-        self.session.headers.update(
-            {
-                "User-Agent": (
-                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/120.0.0.0 Safari/537.36"
-                )
-            }
-        )
+        self.session.headers.update({
+            "User-Agent": (
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                "AppleWebKit/537.36 (KHTML, like Gecko) "
+                "Chrome/120.0.0.0 Safari/537.36"
+            )
+        })
         self.user_id: str | None = None
+        # Adaptive delay settings
+        self.current_delay = 1.0  # Initial delay in seconds
+        self.min_delay = 0.5
+        self.max_delay = 15.0
+
+    def _wait_adaptive(self) -> None:
+        """Wait for the current adaptive delay with a small random jitter."""
+        wait_time = self.current_delay + (random.random() * 0.5)
+        time.sleep(wait_time)
+
+    def _adjust_delay(self, success: bool, rate_limited: bool = False) -> None:
+        """Adjust the adaptive delay based on the outcome of a request."""
+        if rate_limited:
+            # Harsh penalty for hitting a 429
+            self.current_delay = min(self.max_delay, self.current_delay * 3.0)
+        elif success:
+            # Gradually speed up (reduce delay by 5%)
+            self.current_delay = max(self.min_delay, self.current_delay * 0.95)
+        else:
+            # Slight penalty for other errors
+            self.current_delay = min(self.max_delay, self.current_delay * 1.5)
 
     def encode_card(self, title: Any) -> str | None:
         if not title:
@@ -213,7 +233,16 @@ class SauspielScraper:
                 "X-Requested-With": "XMLHttpRequest",
                 "Referer": f"{self.BASE_URL}/spiele",
             }
+            self._wait_adaptive()
             resp = self.session.get(f"{self.BASE_URL}/spiele", params=params, headers=headers)
+
+            if resp.status_code == 200:
+                self._adjust_delay(success=True)
+            elif resp.status_code == 429:
+                self._adjust_delay(success=False, rate_limited=True)
+            else:
+                self._adjust_delay(success=False)
+
             soup = BeautifulSoup(resp.text, "html.parser")
             items = soup.find_all("div", class_="games-item")
 
@@ -223,8 +252,6 @@ class SauspielScraper:
 
             print(f"DEBUG: Found {len(items)} items on page {page}.")
             for item in items:
-                # ... extraction logic ...
-                # (I will keep the existing extraction logic)
                 game_meta: dict[str, Any] = {}
                 subtext = item.find("p", class_="card-title-subtext")
                 if subtext:
@@ -286,12 +313,17 @@ class SauspielScraper:
 
         attempt = 0
         while attempt < max_retries:
+            self._wait_adaptive()
             resp = self.session.get(url, allow_redirects=True)
 
             if resp.status_code == 429:
+                self._adjust_delay(success=False, rate_limited=True)
                 retry_after = resp.headers.get("Retry-After")
                 wait_time = int(retry_after) + 1 if retry_after else 10
-                msg = f"Rate limited (429). Waiting {wait_time}s for game {game_id}..."
+                msg = (
+                    f"Rate limited (429). Waiting {wait_time}s for game {game_id}. "
+                    f"New adaptive delay: {self.current_delay:.1f}s"
+                )
                 if log_func:
                     log_func(msg)
                 else:
@@ -300,12 +332,15 @@ class SauspielScraper:
                 continue
 
             if resp.status_code != 200:
+                self._adjust_delay(success=False)
                 attempt += 1
                 if attempt >= max_retries:
                     raise RuntimeError(f"Failed to fetch game {game_id}: Status {resp.status_code}")
                 time.sleep(1 + attempt)
                 continue
 
+            # Success!
+            self._adjust_delay(success=True)
             if "Anmelden" in resp.text and "Ausloggen" not in resp.text:
                 if log_func:
                     log_func(f"Session expired for {game_id}. Re-logging in...")
@@ -389,7 +424,9 @@ class SauspielScraper:
                 continue
 
             winner_div = card_div.find("div", class_="game-participant-avatar")
-            winner_a = winner_div.find("a") if winner_div and isinstance(winner_div, Tag) else None
+            winner_a = (
+                winner_div.find("a") if winner_div and isinstance(winner_div, Tag) else None
+            )
             winner_name = (
                 str(winner_a["data-username"]) if winner_a and isinstance(winner_a, Tag) else None
             )

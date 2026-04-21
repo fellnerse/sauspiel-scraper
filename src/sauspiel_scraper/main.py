@@ -86,8 +86,6 @@ def scrape(
                 break
             
             progress.advance(task)
-            # Standard delay between successful games
-            time.sleep(0.75 + random.random() * 0.75)
 
     console.print(f"[green]Done! Database updated: {db_path}[/]")
 
