@@ -34,7 +34,7 @@ The Sauspiel scraper, database storage, and Streamlit UI were originally tightly
 ## Guidance
 1.  **Establish a Domain Contract:** Define strict Pydantic models (e.g., `Game`, `GameMeta`) in a dedicated `models.py`. This acts as the "source of truth" for data structure.
 2.  **Isolate the Storage Layer:** Extract database logic into a `GameRepository`. Ensure it accepts and returns domain models, handling serialization internally.
-3.  **Validation Strategy:** 
+3.  **Validation Strategy:**
     *   **Strict Ingress:** The scraper must return validated domain models immediately after parsing. If the data is invalid, fail loudly.
     *   **Resilient Egress:** When loading historical records from a database, use specific exception handling (e.g., `pydantic.ValidationError`) and logging to skip corrupt legacy rows without crashing the application.
 4.  **Decouple UI from Persistence:** The UI should interact only with the Repository and Domain Models.
