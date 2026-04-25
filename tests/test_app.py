@@ -16,16 +16,17 @@ def test_process_game_data_with_dash_laufende():
                 wert="20",
                 spielausgang="gewonnen",
                 laufende="–",
-                location="Stammtisch"
-            )
+                location="Stammtisch",
+            ),
         )
     ]
-    
+
     # This should not raise ValueError
     df = process_game_data(mock_games, "player1")
-    
+
     assert not df.empty
     assert df.iloc[0]["laufende"] == 0
+
 
 def test_process_game_data_with_none_title():
     mock_games = [
@@ -39,13 +40,13 @@ def test_process_game_data_with_none_title():
                 wert="20",
                 spielausgang="gewonnen",
                 laufende="0",
-                location="Stammtisch"
-            )
+                location="Stammtisch",
+            ),
         )
     ]
-    
+
     # This should not raise TypeError
     df = process_game_data(mock_games, "player1")
-    
+
     assert not df.empty
     assert df.iloc[0]["role"] == "Gegenspieler"

@@ -5,7 +5,9 @@ from pydantic import BaseModel, Field
 
 class Trick(BaseModel):
     winner: int | None = Field(default=None, description="Index of the player in the players list")
-    cards: list[str] = Field(default_factory=list, description="List of cards in the trick (e.g. '0:E-A')")
+    cards: list[str] = Field(
+        default_factory=list, description="List of cards in the trick (e.g. '0:E-A')"
+    )
 
 
 class GameMeta(BaseModel):

@@ -51,6 +51,7 @@ CARD_MAP = {
     "Schellen-Sieben": "S-7",
 }
 
+
 class GameRepository(Protocol):
     def game_exists(self, game_id: str) -> bool: ...
 
@@ -63,13 +64,15 @@ class SauspielScraper:
         self.username = username
         self.password = password
         self.session = requests.Session()
-        self.session.headers.update({
-            "User-Agent": (
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
-                "AppleWebKit/537.36 (KHTML, like Gecko) "
-                "Chrome/120.0.0.0 Safari/537.36"
-            )
-        })
+        self.session.headers.update(
+            {
+                "User-Agent": (
+                    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/120.0.0.0 Safari/537.36"
+                )
+            }
+        )
         self.user_id: str | None = None
         # Adaptive delay settings
         self.current_delay = 1.0  # Initial delay in seconds
@@ -362,7 +365,8 @@ class SauspielScraper:
         for row in hand_rows:
             pname = str(row["id"]).replace("_Karten", "")
             cards = [
-                self.encode_card(c.get("title")) or "?" for c in row.find_all("span", class_="card-image")
+                self.encode_card(c.get("title")) or "?"
+                for c in row.find_all("span", class_="card-image")
             ]
             initial_hands[pname] = cards
 
@@ -401,27 +405,19 @@ class SauspielScraper:
                 continue
 
             winner_div = card_div.find("div", class_="game-participant-avatar")
-            winner_a = (
-                winner_div.find("a") if winner_div and isinstance(winner_div, Tag) else None
-            )
+            winner_a = winner_div.find("a") if winner_div and isinstance(winner_div, Tag) else None
             winner_name = (
                 str(winner_a["data-username"]) if winner_a and isinstance(winner_a, Tag) else None
             )
 
-            trick_winner = (
-                players.index(winner_name)
-                if winner_name in players
-                else None
-            )
+            trick_winner = players.index(winner_name) if winner_name in players else None
             trick_cards = []
             for ce in card_div.select(".game-protocol-trick-card"):
                 p_link = ce.find("a", class_="profile-link")
                 p_name = p_link.get_text(strip=True) if p_link else None
                 c_span = ce.find("span", class_="card-image")
                 c_title = c_span.get("title") if c_span and isinstance(c_span, Tag) else None
-                p_idx = (
-                    players.index(p_name) if p_name in players else "?"
-                )
+                p_idx = players.index(p_name) if p_name in players else "?"
                 c_code = self.encode_card(c_title) or "?"
                 trick_cards.append(f"{p_idx}:{c_code}")
             tricks.append(Trick(winner=trick_winner, cards=trick_cards))
@@ -433,7 +429,7 @@ class SauspielScraper:
             wert=wert,
             spielausgang=spielausgang,
             laufende=laufende,
-            extra_fields=extra_fields
+            extra_fields=extra_fields,
         )
 
         return Game(
@@ -446,5 +442,5 @@ class SauspielScraper:
             klopfer=klopfer,
             initial_hands=initial_hands,
             tricks=tricks,
-            meta=meta
+            meta=meta,
         )

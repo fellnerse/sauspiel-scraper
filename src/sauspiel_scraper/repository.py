@@ -28,7 +28,12 @@ class Database:
     def save_game(self, game: Game) -> None:
         self.conn.execute(
             "INSERT OR REPLACE INTO games (game_id, date, game_type, data) VALUES (?, ?, ?, ?)",
-            (game.game_id, game.meta.date.isoformat(), game.game_type or "", game.model_dump_json(exclude_unset=True)),
+            (
+                game.game_id,
+                game.meta.date.isoformat(),
+                game.game_type or "",
+                game.model_dump_json(exclude_unset=True),
+            ),
         )
         self.conn.commit()
 

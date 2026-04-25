@@ -15,7 +15,6 @@ console = Console()
 
 @app.command()
 def export(
-
     username: Annotated[str, typer.Option("--username", "-u", envvar="USERNAME", prompt=True)],
     db_path: Annotated[Path, typer.Option("--db")] = Path("output/sauspiel.db"),
     output_path: Annotated[Path, typer.Option("--output", "-o")] = Path("output/export.jsonl"),
@@ -31,7 +30,7 @@ def export(
     with open(output_path, "w", encoding="utf-8") as f:
         for game in games:
             f.write(game.model_dump_json(exclude_unset=True) + "\n")
-    
+
     console.print(f"[green]Exported {len(games)} game records to {output_path}[/]")
 
 
@@ -82,7 +81,7 @@ def scrape(
             except Exception as e:
                 console.print(f"\n[bold red]Error for {gid}: {e}[/]")
                 continue
-            
+
             progress.advance(task)
 
     console.print(f"[green]Done! Database updated: {db_path}[/]")

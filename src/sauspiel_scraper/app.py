@@ -164,11 +164,7 @@ def main() -> None:
 
     scraper, db = st.session_state["scraper"], st.session_state["db"]
     all_games = db.get_all_games()
-    df = (
-        process_game_data(all_games, scraper.username)
-        if all_games and scraper
-        else pd.DataFrame()
-    )
+    df = process_game_data(all_games, scraper.username) if all_games and scraper else pd.DataFrame()
 
     st.title("🎴 Sauspiel Scraper & Analytics")
 
@@ -197,9 +193,7 @@ def main() -> None:
             if all_games:
                 st.divider()
                 st.header("📥 Export")
-                jsonl_data = "\n".join(
-                    [g.model_dump_json(exclude_unset=True) for g in all_games]
-                )
+                jsonl_data = "\n".join([g.model_dump_json(exclude_unset=True) for g in all_games])
                 st.download_button(
                     label="Download All Data (JSONL)",
                     data=jsonl_data,
