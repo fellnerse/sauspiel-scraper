@@ -3,7 +3,7 @@ from pathlib import Path
 
 import streamlit as st
 
-from sauspiel_scraper.app.analytics import process_game_data, render_analytics
+from sauspiel_scraper.app.analytics import games_to_df, process_game_data, render_analytics
 from sauspiel_scraper.core import SauspielScraper
 from sauspiel_scraper.repository import Database
 
@@ -121,7 +121,8 @@ def main() -> None:
 
     all_games = db.get_all_games()
     if all_games:
-        df = process_game_data(all_games, scraper.username)
+        processed_games = process_game_data(all_games, scraper.username)
+        df = games_to_df(processed_games)
         st.divider()
         render_analytics(df)
     else:

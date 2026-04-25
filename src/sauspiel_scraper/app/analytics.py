@@ -2,13 +2,14 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from sauspiel_scraper.models import Game
+from sauspiel_scraper.models import Game, ProcessedGame
 
 
-def process_game_data(games: list[Game], me: str) -> pd.DataFrame:
+def process_game_data(games: list[Game], me: str) -> list[ProcessedGame]:
     if not games:
-        return pd.DataFrame()
-    rows = []
+        return []
+
+    processed = []
     for g in games:
         # Identify the declarer from the title "GameType von Username"
         declarer = "Unknown"
@@ -21,20 +22,49 @@ def process_game_data(games: list[Game], me: str) -> pd.DataFrame:
         else:
             role = "Spieler" if f"von {me}" in (g.title or "") else "Gegenspieler"
 
-        rows.append(
-            {
-                "game_id": g.game_id,
-                "date": g.meta.date,
-                "type": g.game_type or "Unknown",
-                "declarer": declarer,
-                "won": g.meta.is_won,
-                "value": g.meta.value_int if g.meta.is_won else -g.meta.value_int,
-                "role": role,
-                "laufende": g.meta.laufende_int,
-                "location": g.meta.location or "Unknown",
-            }
+        is_declarer_win = g.meta.is_won
+        is_me_declarer_side = role in ["Spieler", "Partner"]
+
+        if is_me_declarer_side:
+            is_my_win = is_declarer_win
+            net_profit_cents = g.meta.value_int if is_declarer_win else -g.meta.value_int
+        else:
+            is_my_win = not is_declarer_win
+            net_profit_cents = -g.meta.value_int if is_declarer_win else g.meta.value_int
+
+        processed.append(
+            ProcessedGame(
+                game_id=g.game_id,
+                date=g.meta.date,
+                game_type=g.game_type or "Unknown",
+                declarer=declarer,
+                role=role,
+                is_declarer_win=is_declarer_win,
+                is_my_win=is_my_win,
+                net_profit_cents=net_profit_cents,
+                laufende=g.meta.laufende_int,
+                location=g.meta.location or "Unknown",
+            )
         )
-    df = pd.DataFrame(rows)
+    return processed
+
+
+def games_to_df(games: list[ProcessedGame]) -> pd.DataFrame:
+    if not games:
+        return pd.DataFrame()
+
+    data = [g.model_dump() for g in games]
+    df = pd.DataFrame(data)
+
+    # Rename fields for compatibility with existing UI code
+    df = df.rename(
+        columns={
+            "game_type": "type",
+            "is_my_win": "won",
+            "net_profit_cents": "value",
+        }
+    )
+
     if not df.empty:
         df = df.sort_values("date")
         df["cumulative_profit"] = df["value"].cumsum()
