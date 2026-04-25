@@ -41,4 +41,5 @@ dev = [
     "requests-mock>=1.12.1",
     "ruff>=0.15.10",
     "ty>=0.0.31",
+    "watchdog>=6.0.0",
 ]
