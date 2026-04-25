@@ -104,4 +104,4 @@ def render_analytics(df: pd.DataFrame) -> None:
     display_df = display_df.sort_values("date", ascending=False)
     # Rename declarer to Spieler for the UI
     display_df = display_df.rename(columns={"declarer": "Spieler"})
-    st.dataframe(display_df, use_container_width=True, hide_index=True)
+    st.dataframe(display_df, width="stretch", hide_index=True)
