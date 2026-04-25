@@ -11,6 +11,14 @@ hooks = [
 ]
 
 [[repos]]
+repo = "https://github.com/commitizen-tools/commitizen"
+rev = "v4.2.1"
+hooks = [
+  { id = "commitizen", stages = ["commit-msg"] },
+  { id = "commitizen-branch", stages = ["pre-push"] }
+]
+
+[[repos]]
 repo = "https://github.com/astral-sh/ruff-pre-commit"
 rev = "v0.15.12"
 hooks = [
