@@ -1,7 +1,9 @@
+import json
 import random
 import re
 import time
 from datetime import datetime
+from pathlib import Path
 from typing import Any, Protocol
 
 import requests
@@ -171,6 +173,26 @@ class SauspielScraper:
         self.session.cookies.update(data["cookies"])
         self.username = data.get("username", "")
         self.user_id = data.get("user_id")
+
+    def save_session(self, file_path: Path) -> None:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, "w") as f:
+            json.dump(self.get_session_data(), f)
+
+    @classmethod
+    def from_session_file(cls, file_path: Path) -> SauspielScraper | None:
+        if not file_path.exists():
+            return None
+        try:
+            with open(file_path) as f:
+                data = json.load(f)
+            scraper = cls()
+            scraper.load_session_data(data)
+            if scraper.is_logged_in():
+                return scraper
+        except Exception:
+            pass
+        return None
 
     def get_game_list_paginated(
         self, max_new: int = 20, since: datetime | None = None, db: GameRepository | None = None

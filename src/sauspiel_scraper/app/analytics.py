@@ -2,6 +2,44 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
+from sauspiel_scraper.models import Game
+
+
+def process_game_data(games: list[Game], me: str) -> pd.DataFrame:
+    if not games:
+        return pd.DataFrame()
+    rows = []
+    for g in games:
+        # Identify the declarer from the title "GameType von Username"
+        declarer = "Unknown"
+        if g.title and " von " in g.title:
+            declarer = g.title.split(" von ")[-1].strip()
+
+        # Identify role
+        if g.roles and me in g.roles:
+            role = g.roles[me]
+        else:
+            role = "Spieler" if f"von {me}" in (g.title or "") else "Gegenspieler"
+
+        rows.append(
+            {
+                "game_id": g.game_id,
+                "date": g.meta.date,
+                "type": g.game_type or "Unknown",
+                "declarer": declarer,
+                "won": g.meta.is_won,
+                "value": g.meta.value_int if g.meta.is_won else -g.meta.value_int,
+                "role": role,
+                "laufende": g.meta.laufende_int,
+                "location": g.meta.location or "Unknown",
+            }
+        )
+    df = pd.DataFrame(rows)
+    if not df.empty:
+        df = df.sort_values("date")
+        df["cumulative_profit"] = df["value"].cumsum()
+    return df
+
 
 def render_analytics(df: pd.DataFrame) -> None:
     st.header("📈 Analytics")

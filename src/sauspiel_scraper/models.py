@@ -1,3 +1,4 @@
+import re
 from datetime import datetime
 
 from pydantic import BaseModel, Field
@@ -19,6 +20,31 @@ class GameMeta(BaseModel):
     laufende: str | None = None
     # Catch-all for any other parsed meta fields from the HTML table
     extra_fields: dict[str, str] = Field(default_factory=dict)
+
+    @property
+    def value_int(self) -> int:
+        """Parses the 'wert' string into an integer (cents)."""
+        if not self.wert:
+            return 0
+        try:
+            return int(re.sub(r"[^\d-]", "", self.wert))
+        except ValueError, TypeError:
+            return 0
+
+    @property
+    def is_won(self) -> bool:
+        """Returns True if the game was won."""
+        return "gewonnen" in (self.spielausgang or "").lower()
+
+    @property
+    def laufende_int(self) -> int:
+        """Parses the 'laufende' string into an integer."""
+        if not self.laufende:
+            return 0
+        try:
+            return int(re.sub(r"[^\d]", "", self.laufende))
+        except ValueError, TypeError:
+            return 0
 
 
 class Game(BaseModel):

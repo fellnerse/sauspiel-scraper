@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sauspiel_scraper.app.processing import process_game_data
+from sauspiel_scraper.app.analytics import process_game_data
 from sauspiel_scraper.models import Game, GameMeta
 
 

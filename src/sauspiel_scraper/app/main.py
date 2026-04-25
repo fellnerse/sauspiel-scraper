@@ -1,29 +1,25 @@
 from datetime import datetime
 from pathlib import Path
 
-import pandas as pd
 import streamlit as st
 
-from sauspiel_scraper.app.presentation import render_analytics
-from sauspiel_scraper.app.processing import process_game_data
-from sauspiel_scraper.app.session import SESSION_FILE, load_stored_session, save_session
+from sauspiel_scraper.app.analytics import process_game_data, render_analytics
 from sauspiel_scraper.core import SauspielScraper
 from sauspiel_scraper.repository import Database
 
 DB_FILE = Path("output/sauspiel.db")
+SESSION_FILE = Path("output/session.json")
 
 
 def main() -> None:
     st.set_page_config(page_title="Sauspiel Scraper", page_icon="🎴", layout="wide")
 
     if "scraper" not in st.session_state:
-        st.session_state["scraper"] = load_stored_session()
+        st.session_state["scraper"] = SauspielScraper.from_session_file(SESSION_FILE)
     if "db" not in st.session_state:
         st.session_state["db"] = Database()
 
     scraper, db = st.session_state["scraper"], st.session_state["db"]
-    all_games = db.get_all_games()
-    df = process_game_data(all_games, scraper.username) if all_games and scraper else pd.DataFrame()
 
     st.title("🎴 Sauspiel Scraper & Analytics")
 
@@ -37,7 +33,7 @@ def main() -> None:
                     s = SauspielScraper(u, p)
                     if s.login():
                         st.session_state["scraper"] = s
-                        save_session(s)
+                        s.save_session(SESSION_FILE)
                         st.rerun()
                     else:
                         st.error("Login failed.")
@@ -49,6 +45,7 @@ def main() -> None:
                     SESSION_FILE.unlink()
                 st.rerun()
 
+            all_games = db.get_all_games()
             if all_games:
                 st.divider()
                 st.header("📥 Export")
