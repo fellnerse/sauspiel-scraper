@@ -1,7 +1,8 @@
-import pytest
-from unittest.mock import MagicMock, patch
+from unittest.mock import MagicMock
+
 from sauspiel_scraper.core import SauspielScraper
 from sauspiel_scraper.repository import Database
+
 
 def test_get_game_list_paginated_params():
     scraper = SauspielScraper()

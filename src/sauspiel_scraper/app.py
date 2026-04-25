@@ -2,7 +2,6 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any
 
 import pandas as pd
 import plotly.express as px

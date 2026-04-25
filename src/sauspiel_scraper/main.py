@@ -1,5 +1,3 @@
-import random
-import time
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
@@ -8,7 +6,6 @@ import typer
 from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 
-from sauspiel_scraper.app import process_game_data
 from sauspiel_scraper.core import SauspielScraper
 from sauspiel_scraper.repository import Database
 
@@ -83,8 +80,8 @@ def scrape(
                 if data:
                     db.save_game(data)
             except Exception as e:
-                console.print(f"\n[bold red]Fatal error for {gid}: {e}[/]")
-                break
+                console.print(f"\n[bold red]Error for {gid}: {e}[/]")
+                continue
             
             progress.advance(task)
 
@@ -93,4 +90,3 @@ def scrape(
 
 if __name__ == "__main__":
     app()
-   app()

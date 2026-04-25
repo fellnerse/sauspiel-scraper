@@ -1,8 +1,8 @@
-import pytest
-import pandas as pd
 from datetime import datetime
+
 from sauspiel_scraper.app import process_game_data
 from sauspiel_scraper.models import Game, GameMeta
+
 
 def test_process_game_data_with_dash_laufende():
     mock_games = [

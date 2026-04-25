@@ -2,8 +2,6 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import MagicMock
 
-import pytest
-
 from sauspiel_scraper.core import SauspielScraper
 from sauspiel_scraper.models import GamePreview
 
