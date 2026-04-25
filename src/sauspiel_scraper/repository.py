@@ -36,6 +36,8 @@ class Database:
         cursor = self.conn.execute("SELECT data FROM games ORDER BY date DESC")
         games = []
         for row in cursor.fetchall():
+            if '"error":' in row[0]:
+                continue
             try:
                 games.append(Game.model_validate_json(row[0]))
             except Exception:

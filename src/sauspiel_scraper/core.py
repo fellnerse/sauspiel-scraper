@@ -363,7 +363,7 @@ class SauspielScraper:
         for row in hand_rows:
             pname = str(row["id"]).replace("_Karten", "")
             cards = [
-                str(self.encode_card(c.get("title"))) for c in row.find_all("span", class_="card-image")
+                self.encode_card(c.get("title")) or "?" for c in row.find_all("span", class_="card-image")
             ]
             initial_hands[pname] = cards
 

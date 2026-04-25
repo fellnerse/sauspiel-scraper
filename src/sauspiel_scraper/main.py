@@ -1,4 +1,3 @@
-import json
 import random
 import time
 from datetime import datetime
@@ -94,3 +93,4 @@ def scrape(
 
 if __name__ == "__main__":
     app()
+   app()
