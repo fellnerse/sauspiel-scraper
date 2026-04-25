@@ -32,11 +32,10 @@ jobs:
 
       - name: Verify commit messages (Conventional Commits)
         run: |
-          if [ "${{ github.event_name }}" == "pull_request" ]; then
-            uv run cz check --rev-range ${{ github.event.pull_request.base.sha }}..${{ github.event.pull_request.head.sha }}
-          else
-            uv run cz check --rev-range ${{ github.event.before }}..${{ github.event.after }}
-          fi
+          # Fetch origin/main to find the merge base
+          git fetch origin main
+          BASE_SHA=$(git merge-base origin/main HEAD)
+          uv run cz check --rev-range $BASE_SHA..HEAD
 
       - name: Run tests
         run: uv run pytest
