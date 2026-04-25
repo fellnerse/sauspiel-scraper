@@ -18,4 +18,5 @@ dist/
 # Scraper Data
 output/
 *.html
+!tests/fixtures/*.html
 *.json
