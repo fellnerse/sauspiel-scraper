@@ -1,7 +1,7 @@
 ---
 title: "feat: ProcessedGame model and profit calculation fix"
 type: feat
-status: active
+status: completed
 date: 2026-04-25
 origin: docs/brainstorms/2026-04-25-architecture-decoupling-requirements.md
 ---
