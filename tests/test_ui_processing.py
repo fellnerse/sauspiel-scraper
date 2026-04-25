@@ -85,7 +85,7 @@ def test_process_game_data_profit_calculation():
     assert processed[0].net_profit_cents == 20
 
     # Second game: player1 is opponent, declarer (player2) lost 30
-    # Thus player1 won 30! (This was the bug fix)
+    # Thus player1 won 30!
     assert processed[1].role == "Gegenspieler"
     assert processed[1].is_my_win is True
     assert processed[1].net_profit_cents == 30
@@ -118,21 +118,64 @@ def test_process_game_data_opponent_lost():
     assert processed[0].net_profit_cents == -50
 
 
-def test_process_game_data_substring_name_bug():
-    # If 'me' is 'player' and title is 'Sauspiel von player2', role should be 'Gegenspieler'
+def test_process_game_data_mitspieler_role():
+    # 'Mitspieler' should be recognized as declarer side
     mock_games = [
         Game(
-            game_id="4",
+            game_id="5",
             game_type="Sauspiel",
             title="Sauspiel von player2",
-            roles={},  # Empty roles to trigger fallback
+            roles={"player1": "Mitspieler", "player2": "Spieler"},
             meta=GameMeta(
-                date=datetime(2024, 3, 20, 12, 15),
-                wert="10",
+                date=datetime(2024, 3, 20, 12, 20),
+                wert="80",  # Total value
                 spielausgang="gewonnen",
             ),
         )
     ]
-    processed = process_game_data(mock_games, "player")
-    assert processed[0].declarer == "player2"
+    processed = process_game_data(mock_games, "player1")
+    assert processed[0].role == "Mitspieler"
+    assert processed[0].is_my_win is True
+    assert processed[0].net_profit_cents == 80
+
+
+def test_process_game_data_solo_opponent():
+    mock_games = [
+        Game(
+            game_id="6",
+            game_type="Eichel-Solo",
+            title="Eichel-Solo von player2",
+            roles={"player1": "Gegenspieler", "player2": "Spieler"},
+            meta=GameMeta(
+                date=datetime(2024, 3, 20, 12, 25),
+                wert="300",
+                spielausgang="gewonnen",
+            ),
+        )
+    ]
+    processed = process_game_data(mock_games, "player1")
     assert processed[0].role == "Gegenspieler"
+    assert processed[0].is_my_win is False
+    # Should be -100 (300 / 3)
+    assert processed[0].net_profit_cents == -100
+
+
+def test_process_game_data_solo_declarer():
+    mock_games = [
+        Game(
+            game_id="7",
+            game_type="Wenz",
+            title="Wenz von player1",
+            roles={"player1": "Spieler", "player2": "Gegenspieler"},
+            meta=GameMeta(
+                date=datetime(2024, 3, 20, 12, 30),
+                wert="420",
+                spielausgang="verloren",
+            ),
+        )
+    ]
+    processed = process_game_data(mock_games, "player1")
+    assert processed[0].role == "Spieler"
+    assert processed[0].is_my_win is False
+    # Should be -420 (Total loss for declarer)
+    assert processed[0].net_profit_cents == -420
