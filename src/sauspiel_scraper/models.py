@@ -65,3 +65,16 @@ class GamePreview(BaseModel):
     date: datetime
     deck_type: str | None = None
     location: str | None = None
+
+
+class ProcessedGame(BaseModel):
+    game_id: str
+    date: datetime
+    game_type: str
+    declarer: str
+    role: str
+    is_declarer_win: bool
+    is_my_win: bool
+    net_profit_cents: int
+    laufende: int
+    location: str
