@@ -14,13 +14,17 @@ def process_game_data(games: list[Game], me: str) -> list[ProcessedGame]:
         # Identify the declarer from the title "GameType von Username"
         declarer = "Unknown"
         if g.title and " von " in g.title:
-            declarer = g.title.split(" von ")[-1].strip()
+            # Use split once from the left to handle names with spaces if needed
+            # although Sauspiel names usually don't have spaces, " von " is the reliable separator
+            parts = g.title.split(" von ", 1)
+            if len(parts) > 1:
+                declarer = parts[1].strip()
 
         # Identify role
         if g.roles and me in g.roles:
             role = g.roles[me]
         else:
-            role = "Spieler" if f"von {me}" in (g.title or "") else "Gegenspieler"
+            role = "Spieler" if declarer == me else "Gegenspieler"
 
         is_declarer_win = g.meta.is_won
         is_me_declarer_side = role in ["Spieler", "Partner"]
@@ -67,7 +71,6 @@ def games_to_df(games: list[ProcessedGame]) -> pd.DataFrame:
 
     if not df.empty:
         df = df.sort_values("date")
-        df["cumulative_profit"] = df["value"].cumsum()
     return df
 
 

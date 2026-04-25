@@ -20,7 +20,7 @@ dependencies = [
 
 [project.scripts]
 sauspiel-scraper = "sauspiel_scraper.main:app"
-sauspiel-web = "sauspiel_scraper.app:run_app"
+sauspiel-web = "sauspiel_scraper.app.main:run_app"
 
 [tool.ruff]
 line-length = 100

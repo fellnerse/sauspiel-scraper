@@ -95,7 +95,6 @@ def test_process_game_data_profit_calculation():
     assert len(df) == 2
     assert df.iloc[0]["value"] == 20
     assert df.iloc[1]["value"] == 30
-    assert df.iloc[1]["cumulative_profit"] == 50
 
 
 def test_process_game_data_opponent_lost():
@@ -117,3 +116,23 @@ def test_process_game_data_opponent_lost():
     assert processed[0].is_declarer_win is True
     assert processed[0].is_my_win is False
     assert processed[0].net_profit_cents == -50
+
+
+def test_process_game_data_substring_name_bug():
+    # If 'me' is 'player' and title is 'Sauspiel von player2', role should be 'Gegenspieler'
+    mock_games = [
+        Game(
+            game_id="4",
+            game_type="Sauspiel",
+            title="Sauspiel von player2",
+            roles={},  # Empty roles to trigger fallback
+            meta=GameMeta(
+                date=datetime(2024, 3, 20, 12, 15),
+                wert="10",
+                spielausgang="gewonnen",
+            ),
+        )
+    ]
+    processed = process_game_data(mock_games, "player")
+    assert processed[0].declarer == "player2"
+    assert processed[0].role == "Gegenspieler"

@@ -1,7 +1,9 @@
+import sys
 from datetime import datetime
 from pathlib import Path
 
 import streamlit as st
+from streamlit.web import cli as stcli
 
 from sauspiel_scraper.app.analytics import games_to_df, process_game_data, render_analytics
 from sauspiel_scraper.core import SauspielScraper
@@ -127,6 +129,16 @@ def main() -> None:
         render_analytics(df)
     else:
         st.info("Database empty.")
+
+
+def run_app() -> None:
+    """
+    Entry point for the Streamlit application.
+    This starts the Streamlit server pointing to this file.
+    """
+    app_path = Path(__file__).resolve()
+    sys.argv = ["streamlit", "run", str(app_path)]
+    sys.exit(stcli.main())
 
 
 if __name__ == "__main__":
