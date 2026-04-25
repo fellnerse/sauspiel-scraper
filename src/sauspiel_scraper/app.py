@@ -8,7 +8,9 @@ import pandas as pd
 import plotly.express as px
 import streamlit as st
 
-from sauspiel_scraper.core import Database, SauspielScraper
+from sauspiel_scraper.core import SauspielScraper
+from sauspiel_scraper.models import Game
+from sauspiel_scraper.repository import Database
 
 SESSION_FILE = Path("output/session.json")
 DB_FILE = Path("output/sauspiel.db")
@@ -34,55 +36,50 @@ def load_stored_session() -> SauspielScraper | None:
     return None
 
 
-def process_game_data(games: list[dict[str, Any]], me: str) -> pd.DataFrame:
+def process_game_data(games: list[Game], me: str) -> pd.DataFrame:
     if not games:
         return pd.DataFrame()
     rows = []
     for g in games:
-        meta = g.get("meta", {})
-        raw_val = meta.get("wert", "0")
         val = 0
         try:
-            val = int(re.sub(r"[^\d-]", "", raw_val))
+            val = int(re.sub(r"[^\d-]", "", g.meta.wert)) if g.meta.wert else 0
         except Exception:
             pass
 
-        outcome = meta.get("spielausgang", "").lower()
+        outcome = (g.meta.spielausgang or "").lower()
         won = "gewonnen" in outcome
 
         # Enhanced role logic: check 'roles' dict, fallback to title
-        roles_dict = g.get("roles", {})
-        if roles_dict and me in roles_dict:
-            role = roles_dict[me]
+        if g.roles and me in g.roles:
+            role = g.roles[me]
         else:
             # Fallback for old data in DB
-            title = g.get("title") or ""
+            title = g.title or ""
             role = "Spieler" if f"von {me}" in title else "Gegenspieler"
 
         # Identify the declarer from the title "GameType von Username"
-        title = g.get("title") or ""
         declarer = "Unknown"
-        if " von " in title:
-            declarer = title.split(" von ")[-1].strip()
+        if g.title and " von " in g.title:
+            declarer = g.title.split(" von ")[-1].strip()
 
-        raw_laufende = meta.get("laufende", "0")
         laufende = 0
         try:
-            laufende = int(re.sub(r"[^\d]", "", raw_laufende))
+            laufende = int(re.sub(r"[^\d]", "", g.meta.laufende)) if g.meta.laufende else 0
         except Exception:
             pass
 
         rows.append(
             {
-                "game_id": g.get("game_id"),
-                "date": pd.to_datetime(meta.get("date")),
-                "type": g.get("game_type", "Unknown"),
+                "game_id": g.game_id,
+                "date": pd.to_datetime(g.meta.date),
+                "type": g.game_type or "Unknown",
                 "declarer": declarer,
                 "won": won,
                 "value": val if won else -val,
                 "role": role,
                 "laufende": laufende,
-                "location": meta.get("location", "Unknown"),
+                "location": g.meta.location or "Unknown",
             }
         )
     df = pd.DataFrame(rows)
@@ -202,7 +199,7 @@ def main() -> None:
                 st.divider()
                 st.header("📥 Export")
                 jsonl_data = "\n".join(
-                    [json.dumps(g, ensure_ascii=False) for g in all_games]
+                    [g.model_dump_json(exclude_unset=True) for g in all_games]
                 )
                 st.download_button(
                     label="Download All Data (JSONL)",
@@ -255,7 +252,7 @@ def main() -> None:
                 pb = p_bar_area.progress(0)
                 scraped_count = 0
                 for i, info in enumerate(new_list):
-                    gid = info["game_id"]
+                    gid = info.game_id
                     p_text_area.markdown(f"Scraping `{gid}` ({i + 1}/{len(new_list)})")
 
                     def st_log(msg: str) -> None:
@@ -263,7 +260,7 @@ def main() -> None:
 
                     try:
                         data = scraper.scrape_game(gid, info, log_func=st_log)
-                        db.save_game(gid, info.get("date", ""), data.get("game_type", ""), data)
+                        db.save_game(data)
                         scraped_count += 1
                     except Exception as e:
                         st.error(f"Error {gid}: {e}")

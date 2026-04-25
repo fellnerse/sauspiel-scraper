@@ -1,14 +1,14 @@
 import json
 import random
 import re
-import sqlite3
 import time
 from datetime import datetime
-from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import requests
 from bs4 import BeautifulSoup, Tag
+
+from sauspiel_scraper.models import Game, GameMeta, GamePreview, Trick
 
 CARD_MAP = {
     "Eichel-Sau": "E-A",
@@ -52,38 +52,8 @@ CARD_MAP = {
     "Schellen-Sieben": "S-7",
 }
 
-
-class Database:
-    def __init__(self, db_path: Path = Path("output/sauspiel.db")):
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.create_tables()
-
-    def create_tables(self) -> None:
-        self.conn.execute("""
-            CREATE TABLE IF NOT EXISTS games (
-                game_id TEXT PRIMARY KEY,
-                date TEXT,
-                game_type TEXT,
-                data TEXT
-            )
-        """)
-        self.conn.commit()
-
-    def game_exists(self, game_id: str) -> bool:
-        cursor = self.conn.execute("SELECT 1 FROM games WHERE game_id = ?", (game_id,))
-        return cursor.fetchone() is not None
-
-    def save_game(self, game_id: str, date: str, game_type: str, data: dict[str, Any]) -> None:
-        self.conn.execute(
-            "INSERT OR REPLACE INTO games (game_id, date, game_type, data) VALUES (?, ?, ?, ?)",
-            (game_id, date, game_type, json.dumps(data, ensure_ascii=False)),
-        )
-        self.conn.commit()
-
-    def get_all_games(self) -> list[dict[str, Any]]:
-        cursor = self.conn.execute("SELECT data FROM games ORDER BY date DESC")
-        return [json.loads(row[0]) for row in cursor.fetchall()]
+class GameRepository(Protocol):
+    def game_exists(self, game_id: str) -> bool: ...
 
 
 class SauspielScraper:
@@ -201,9 +171,9 @@ class SauspielScraper:
         self.user_id = data.get("user_id")
 
     def get_game_list_paginated(
-        self, max_new: int = 20, since: datetime | None = None, db: Database | None = None
-    ) -> list[dict[str, Any]]:
-        all_found: list[dict[str, Any]] = []
+        self, max_new: int = 20, since: datetime | None = None, db: GameRepository | None = None
+    ) -> list[GamePreview]:
+        all_found: list[GamePreview] = []
         new_count = 0
         page = 1
 
@@ -262,7 +232,7 @@ class SauspielScraper:
                         if since and game_date < since:
                             print(f"DEBUG: Reached date threshold {since}")
                             return all_found
-                        game_meta["date"] = game_date.isoformat()
+                        game_meta["date"] = game_date
 
                     parts = [p.strip() for p in txt.split("—")]
                     if len(parts) >= 2:
@@ -283,7 +253,9 @@ class SauspielScraper:
                         exists = db.game_exists(gid) if db else False
                         if not exists:
                             new_count += 1
-                            all_found.append(game_meta)
+                            if "date" not in game_meta:
+                                raise ValueError(f"Could not parse date for game {gid}")
+                            all_found.append(GamePreview(**game_meta))
                             print(f"DEBUG: New game found: {gid}")
                         else:
                             print(f"DEBUG: Game {gid} already in DB.")
@@ -304,10 +276,10 @@ class SauspielScraper:
     def scrape_game(
         self,
         game_id: str,
-        list_meta: dict[str, Any],
+        preview: GamePreview,
         max_retries: int = 5,
         log_func: Any = None,
-    ) -> dict[str, Any]:
+    ) -> Game:
         url = f"{self.BASE_URL}/spiele/{game_id}"
         h1 = None
 
@@ -352,7 +324,7 @@ class SauspielScraper:
             h1 = soup.find("h1")
             if not h1:
                 if "nicht gefunden" in resp.text:
-                    return {"game_id": game_id, "error": "Not found", "meta": list_meta}
+                    raise ValueError(f"Game {game_id} not found")
                 attempt += 1
                 if attempt >= max_retries:
                     raise RuntimeError(f"Could not find title for game {game_id}. Blocked?")
@@ -362,20 +334,14 @@ class SauspielScraper:
             # Success!
             break
 
-        game_data: dict[str, Any] = {
-            "game_id": game_id,
-            "url": url,
-            "title": h1.get_text(strip=True) if h1 and isinstance(h1, Tag) else None,
-            "players": [],
-            "roles": {},
-            "klopfer": [],
-            "initial_hands": {},
-            "tricks": [],
-            "meta": list_meta.copy(),
-        }
+        title_text = h1.get_text(strip=True) if h1 and isinstance(h1, Tag) else ""
+        game_type = title_text.split()[0] if title_text else None
 
-        if game_data["title"]:
-            game_data["game_type"] = game_data["title"].split()[0]
+        players = []
+        roles = {}
+        klopfer = []
+        initial_hands = {}
+        tricks = []
 
         # Identify players and roles from the "Karten von" rows in the protocol
         # These divs contain both the player name and the role
@@ -384,34 +350,46 @@ class SauspielScraper:
             p_link = row.find("a", href=re.compile(r"^/profile/"))
             if p_link:
                 pname = p_link.get_text(strip=True)
-                if pname not in game_data["players"]:
-                    game_data["players"].append(pname)
+                if pname not in players:
+                    players.append(pname)
 
                 # Role is in a div inside this row
                 role_el = row.find("div", class_="game-participant-role")
                 if role_el:
-                    game_data["roles"][pname] = role_el.get_text(strip=True)
+                    roles[pname] = role_el.get_text(strip=True)
 
         # Initial hands (from the same rows)
         hand_rows = soup.find_all("div", id=re.compile(r"_Karten$"))
         for row in hand_rows:
             pname = str(row["id"]).replace("_Karten", "")
             cards = [
-                self.encode_card(c.get("title")) for c in row.find_all("span", class_="card-image")
+                str(self.encode_card(c.get("title"))) for c in row.find_all("span", class_="card-image")
             ]
-            game_data["initial_hands"][pname] = cards
+            initial_hands[pname] = cards
 
         # Meta results
+        extra_fields = {}
+        wert = None
+        spielausgang = None
+        laufende = None
+
         result_table = soup.find("table", class_="game-result-table")
         if result_table and isinstance(result_table, Tag):
             for tr in result_table.find_all("tr"):
                 th, td = tr.find("th"), tr.find("td")
                 if th and td:
                     key = th.get_text(strip=True).lower().replace(" ", "_")
+                    val = td.get_text(strip=True)
                     if key == "klopfer":
-                        game_data["klopfer"] = [a.get_text(strip=True) for a in td.find_all("a")]
+                        klopfer = [a.get_text(strip=True) for a in td.find_all("a")]
+                    elif key == "wert":
+                        wert = val
+                    elif key == "spielausgang":
+                        spielausgang = val
+                    elif key == "laufende":
+                        laufende = val
                     else:
-                        game_data["meta"][key] = td.get_text(strip=True)
+                        extra_fields[key] = val
 
         # Tricks
         trick_headers = soup.find_all("h4", class_="card-title")
@@ -431,24 +409,43 @@ class SauspielScraper:
                 str(winner_a["data-username"]) if winner_a and isinstance(winner_a, Tag) else None
             )
 
-            trick_data: dict[str, Any] = {
-                "winner": (
-                    game_data["players"].index(winner_name)
-                    if winner_name in game_data["players"]
-                    else None
-                ),
-                "cards": [],
-            }
+            trick_winner = (
+                players.index(winner_name)
+                if winner_name in players
+                else None
+            )
+            trick_cards = []
             for ce in card_div.select(".game-protocol-trick-card"):
                 p_link = ce.find("a", class_="profile-link")
                 p_name = p_link.get_text(strip=True) if p_link else None
                 c_span = ce.find("span", class_="card-image")
                 c_title = c_span.get("title") if c_span and isinstance(c_span, Tag) else None
                 p_idx = (
-                    game_data["players"].index(p_name) if p_name in game_data["players"] else "?"
+                    players.index(p_name) if p_name in players else "?"
                 )
                 c_code = self.encode_card(c_title) or "?"
-                trick_data["cards"].append(f"{p_idx}:{c_code}")
-            game_data["tricks"].append(trick_data)
+                trick_cards.append(f"{p_idx}:{c_code}")
+            tricks.append(Trick(winner=trick_winner, cards=trick_cards))
 
-        return game_data
+        meta = GameMeta(
+            date=preview.date,
+            deck_type=preview.deck_type,
+            location=preview.location,
+            wert=wert,
+            spielausgang=spielausgang,
+            laufende=laufende,
+            extra_fields=extra_fields
+        )
+
+        return Game(
+            game_id=game_id,
+            url=url,
+            title=title_text,
+            game_type=game_type,
+            players=players,
+            roles=roles,
+            klopfer=klopfer,
+            initial_hands=initial_hands,
+            tricks=tricks,
+            meta=meta
+        )

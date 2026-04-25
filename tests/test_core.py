@@ -1,6 +1,7 @@
 import pytest
 from unittest.mock import MagicMock, patch
-from sauspiel_scraper.core import SauspielScraper, Database
+from sauspiel_scraper.core import SauspielScraper
+from sauspiel_scraper.repository import Database
 
 def test_get_game_list_paginated_params():
     scraper = SauspielScraper()
@@ -52,7 +53,7 @@ def test_get_game_list_paginated_finds_new_games():
     new_games = scraper.get_game_list_paginated(max_new=5, db=db)
     
     assert len(new_games) == 1
-    assert new_games[0]["game_id"] == "999999"
+    assert new_games[0].game_id == "999999"
     db.game_exists.assert_called_with("999999")
 
 def test_get_game_list_paginated_skips_existing():
@@ -86,11 +87,11 @@ def test_get_game_list_paginated_multiple_pages():
     scraper.session = MagicMock()
     
     # Page 1 has 20 games (triggers next page)
-    items_p1 = "".join([f'<div class="games-item"><h4 class="card-title"><a href="/spiele/{i}"></a></h4></div>' for i in range(20)])
+    items_p1 = "".join([f'<div class="games-item"><h4 class="card-title"><a href="/spiele/{i}"></a></h4><p class="card-title-subtext">20.03.2024 12:00 — Eichel</p></div>' for i in range(20)])
     html1 = f"<div>{items_p1}</div>"
     
     # Page 2 has 1 game (stops pagination)
-    html2 = '<div class="games-item"><h4 class="card-title"><a href="/spiele/102"></a></h4></div>'
+    html2 = '<div class="games-item"><h4 class="card-title"><a href="/spiele/102"></a></h4><p class="card-title-subtext">20.03.2024 12:00 — Eichel</p></div>'
     
     mock_resp1 = MagicMock(text=html1)
     mock_resp2 = MagicMock(text=html2)
@@ -115,9 +116,9 @@ def test_get_game_list_paginated_no_userid_needed():
     scraper = SauspielScraper()
     scraper.user_id = None # Simulate not yet identified
     scraper.session = MagicMock()
-    mock_resp = MagicMock(text='<div class="games-item"><h4 class="card-title"><a href="/spiele/123"></a></h4></div>')
+    mock_resp = MagicMock(text='<div class="games-item"><h4 class="card-title"><a href="/spiele/123"></a></h4><p class="card-title-subtext">20.03.2024 12:00 — Eichel</p></div>')
     scraper.session.get.return_value = mock_resp
     
     new_games = scraper.get_game_list_paginated(max_new=1)
     assert len(new_games) == 1
-    assert new_games[0]["game_id"] == "123"
+    assert new_games[0].game_id == "123"

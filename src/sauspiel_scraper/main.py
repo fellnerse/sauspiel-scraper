@@ -1,3 +1,4 @@
+import json
 import random
 import time
 from datetime import datetime
@@ -9,7 +10,8 @@ from rich.console import Console
 from rich.progress import BarColumn, Progress, SpinnerColumn, TaskProgressColumn, TextColumn
 
 from sauspiel_scraper.app import process_game_data
-from sauspiel_scraper.core import Database, SauspielScraper
+from sauspiel_scraper.core import SauspielScraper
+from sauspiel_scraper.repository import Database
 
 app = typer.Typer(help="Sauspiel Game Scraper CLI")
 console = Console()
@@ -32,9 +34,9 @@ def export(
     output_path.parent.mkdir(parents=True, exist_ok=True)
     with open(output_path, "w", encoding="utf-8") as f:
         for game in games:
-            f.write(json.dumps(game, ensure_ascii=False) + "\n")
+            f.write(game.model_dump_json(exclude_unset=True) + "\n")
     
-    console.print(f"[green]Exported {len(games)} raw game records to {output_path}[/]")
+    console.print(f"[green]Exported {len(games)} game records to {output_path}[/]")
 
 
 @app.command()
@@ -74,13 +76,13 @@ def scrape(
     ) as progress:
         task = progress.add_task("Scraping...", total=len(new_games))
         for info in new_games:
-            gid = info["game_id"]
+            gid = info.game_id
             progress.update(task, description=f"Scraping {gid}")
             try:
                 # Core method now handles retries and waiting
                 data = scraper.scrape_game(gid, info, log_func=console.print)
                 if data:
-                    db.save_game(gid, info.get("date", ""), data.get("game_type", ""), data)
+                    db.save_game(data)
             except Exception as e:
                 console.print(f"\n[bold red]Fatal error for {gid}: {e}[/]")
                 break

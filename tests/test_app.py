@@ -1,22 +1,24 @@
 import pytest
 import pandas as pd
+from datetime import datetime
 from sauspiel_scraper.app import process_game_data
+from sauspiel_scraper.models import Game, GameMeta
 
 def test_process_game_data_with_dash_laufende():
     mock_games = [
-        {
-            "game_id": "12345",
-            "game_type": "Sauspiel",
-            "title": "Sauspiel von player1",
-            "roles": {"player1": "Spieler"},
-            "meta": {
-                "date": "2024-03-20T12:00:00",
-                "wert": "20",
-                "spielausgang": "gewonnen",
-                "laufende": "–",  # This is the problematic character
-                "location": "Stammtisch"
-            }
-        }
+        Game(
+            game_id="12345",
+            game_type="Sauspiel",
+            title="Sauspiel von player1",
+            roles={"player1": "Spieler"},
+            meta=GameMeta(
+                date=datetime(2024, 3, 20, 12, 0),
+                wert="20",
+                spielausgang="gewonnen",
+                laufende="–",
+                location="Stammtisch"
+            )
+        )
     ]
     
     # This should not raise ValueError
@@ -27,19 +29,19 @@ def test_process_game_data_with_dash_laufende():
 
 def test_process_game_data_with_none_title():
     mock_games = [
-        {
-            "game_id": "12346",
-            "game_type": "Sauspiel",
-            "title": None, # This should not raise TypeError
-            "roles": None, # Also test for None roles
-            "meta": {
-                "date": "2024-03-20T12:00:00",
-                "wert": "20",
-                "spielausgang": "gewonnen",
-                "laufende": "0",
-                "location": "Stammtisch"
-            }
-        }
+        Game(
+            game_id="12346",
+            game_type="Sauspiel",
+            title=None,
+            roles={},
+            meta=GameMeta(
+                date=datetime(2024, 3, 20, 12, 0),
+                wert="20",
+                spielausgang="gewonnen",
+                laufende="0",
+                location="Stammtisch"
+            )
+        )
     ]
     
     # This should not raise TypeError
