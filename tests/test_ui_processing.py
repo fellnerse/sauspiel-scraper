@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from sauspiel_scraper.app.analytics import process_game_data
+from sauspiel_scraper.app.analytics import games_to_df, process_game_data
 from sauspiel_scraper.models import Game, GameMeta
 
 
@@ -21,11 +21,10 @@ def test_process_game_data_with_dash_laufende():
         )
     ]
 
-    # This should not raise ValueError
-    df = process_game_data(mock_games, "player1")
+    processed = process_game_data(mock_games, "player1")
 
-    assert not df.empty
-    assert df.iloc[0]["laufende"] == 0
+    assert len(processed) == 1
+    assert processed[0].laufende == 0
 
 
 def test_process_game_data_with_none_title():
@@ -45,11 +44,10 @@ def test_process_game_data_with_none_title():
         )
     ]
 
-    # This should not raise TypeError
-    df = process_game_data(mock_games, "player1")
+    processed = process_game_data(mock_games, "player1")
 
-    assert not df.empty
-    assert df.iloc[0]["role"] == "Gegenspieler"
+    assert len(processed) == 1
+    assert processed[0].role == "Gegenspieler"
 
 
 def test_process_game_data_profit_calculation():
@@ -78,12 +76,63 @@ def test_process_game_data_profit_calculation():
         ),
     ]
 
-    df = process_game_data(mock_games, "player1")
+    processed = process_game_data(mock_games, "player1")
 
+    assert len(processed) == 2
+    # First game: player1 is declarer, won 20
+    assert processed[0].role == "Spieler"
+    assert processed[0].is_my_win is True
+    assert processed[0].net_profit_cents == 20
+
+    # Second game: player1 is opponent, declarer (player2) lost 30
+    # Thus player1 won 30! (This was the bug fix)
+    assert processed[1].role == "Gegenspieler"
+    assert processed[1].is_my_win is True
+    assert processed[1].net_profit_cents == 30
+
+    # Test conversion to DataFrame
+    df = games_to_df(processed)
     assert len(df) == 2
-    # First game: won 20
     assert df.iloc[0]["value"] == 20
-    # Second game: lost 30
-    assert df.iloc[1]["value"] == -30
-    # Cumulative profit: 20 + (-30) = -10
-    assert df.iloc[1]["cumulative_profit"] == -10
+    assert df.iloc[1]["value"] == 30
+
+
+def test_process_game_data_opponent_lost():
+    mock_games = [
+        Game(
+            game_id="3",
+            game_type="Sauspiel",
+            title="Sauspiel von player2",
+            roles={"player1": "Gegenspieler", "player2": "Spieler"},
+            meta=GameMeta(
+                date=datetime(2024, 3, 20, 12, 10),
+                wert="50",
+                spielausgang="gewonnen",
+            ),
+        )
+    ]
+    processed = process_game_data(mock_games, "player1")
+    assert processed[0].role == "Gegenspieler"
+    assert processed[0].is_declarer_win is True
+    assert processed[0].is_my_win is False
+    assert processed[0].net_profit_cents == -50
+
+
+def test_process_game_data_substring_name_bug():
+    # If 'me' is 'player' and title is 'Sauspiel von player2', role should be 'Gegenspieler'
+    mock_games = [
+        Game(
+            game_id="4",
+            game_type="Sauspiel",
+            title="Sauspiel von player2",
+            roles={},  # Empty roles to trigger fallback
+            meta=GameMeta(
+                date=datetime(2024, 3, 20, 12, 15),
+                wert="10",
+                spielausgang="gewonnen",
+            ),
+        )
+    ]
+    processed = process_game_data(mock_games, "player")
+    assert processed[0].declarer == "player2"
+    assert processed[0].role == "Gegenspieler"

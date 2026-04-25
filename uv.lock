@@ -832,6 +832,7 @@ dev = [
     { name = "requests-mock" },
     { name = "ruff" },
     { name = "ty" },
+    { name = "watchdog" },
 ]
 
 [package.metadata]
@@ -854,6 +855,7 @@ dev = [
     { name = "requests-mock", specifier = ">=1.12.1" },
     { name = "ruff", specifier = ">=0.15.10" },
     { name = "ty", specifier = ">=0.0.31" },
+    { name = "watchdog", specifier = ">=6.0.0" },
 ]
 
 [[package]]
