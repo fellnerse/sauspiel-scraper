@@ -16,14 +16,8 @@ def test_scrape_parallel_orchestration(mock_progress, mock_scraper_cls, mock_db_
     mock_scraper.get_game_list_paginated.return_value = [mock_preview]
 
     mock_scraper.scrape_game.return_value = MagicMock()
-
-    # Mock rate limiter stats
-    mock_stats = MagicMock()
-    mock_stats.total_requests = 1
-    mock_stats.total_429s = 0
-    mock_stats.requests_per_minute = 20.0
-    mock_stats.total_waited_seconds = 5.0
-    mock_scraper.rate_limiter.get_stats.return_value = mock_stats
+    mock_scraper.rate_limiter.total_requests = 1
+    mock_scraper.rate_limiter.total_429s = 0
 
     # Call scrape (with minimal count to keep it fast)
     from typer.testing import CliRunner
@@ -35,5 +29,5 @@ def test_scrape_parallel_orchestration(mock_progress, mock_scraper_cls, mock_db_
 
     assert result.exit_code == 0
     mock_scraper.scrape_game.assert_called()
-    assert "Calibration Summary" in result.output
-    assert "20.00 RPM" in result.output
+    assert "Done! Scraped 1 games" in result.output
+    assert "Total Requests: 1" in result.output

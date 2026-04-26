@@ -95,13 +95,11 @@ def scrape(
             for future in as_completed(futures):
                 future.result()
 
-    stats = scraper.rate_limiter.get_stats()
-    console.print("\n[bold cyan]Calibration Summary:[/]")
-    console.print(f"  Total Requests: {stats.total_requests}")
-    console.print(f"  Total 429s: {stats.total_429s}")
-    console.print(f"  Avg Rate: {stats.requests_per_minute:.2f} RPM")
-    console.print(f"  Total Time Wait: {stats.total_waited_seconds:.1f}s")
-    console.print(f"[green]Done! Database updated: {db_path}[/]")
+    console.print(f"\n[green]Done! Scraped {len(new_games)} games.[/]")
+    console.print(f"Total Requests: {scraper.rate_limiter.total_requests}")
+    if scraper.rate_limiter.total_429s > 0:
+        console.print(f"[yellow]Total 429s: {scraper.rate_limiter.total_429s}[/]")
+    console.print(f"Database updated: {db_path}")
 
 
 if __name__ == "__main__":

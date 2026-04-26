@@ -99,7 +99,6 @@ class SauspielScraper:
                 self.rate_limiter.report_429()
                 return False
             if "Ausloggen" in resp.text:
-                self.rate_limiter.report_success()
                 self._identify_user_id(resp.text)
                 return True
         except Exception:
@@ -117,7 +116,6 @@ class SauspielScraper:
                 return False
 
             if "Ausloggen" in resp.text:
-                self.rate_limiter.report_success()
                 self._identify_user_id(resp.text)
                 return True
 
@@ -152,7 +150,6 @@ class SauspielScraper:
 
             success = "Ausloggen" in resp.text
             if success:
-                self.rate_limiter.report_success()
                 self._identify_user_id(resp.text)
             else:
                 print(
@@ -255,7 +252,7 @@ class SauspielScraper:
             resp = self.session.get(f"{self.BASE_URL}/spiele", params=params, headers=headers)
 
             if resp.status_code == 200:
-                self.rate_limiter.report_success()
+                pass
             elif resp.status_code == 429:
                 retry_after = resp.headers.get("Retry-After")
                 self.rate_limiter.report_429(int(retry_after) if retry_after else None)
@@ -352,7 +349,6 @@ class SauspielScraper:
                 continue
 
             # Success!
-            self.rate_limiter.report_success()
             if "Anmelden" in resp.text and "Ausloggen" not in resp.text:
                 if log_func:
                     log_func(f"Session expired for {game_id}. Re-logging in...")

@@ -7,7 +7,6 @@ problem_type: performance_issue
 component: tooling
 symptoms:
   - HTTP 429 Too Many Requests errors every 20-30 requests
-  - Scraper throughput limited by reactive adaptive delay logic
   - Inefficient sequential data fetching
 root_cause: async_timing
 resolution_type: code_fix
@@ -18,39 +17,35 @@ tags: [scraping, rate-limiting, concurrency, python-threading, performance]
 # Parallel Rate-Limited Scraper with Global Pacing
 
 ## Problem
-The sequential scraper was hitting a hard rate limit on the Sauspiel server approximately every 20 requests. The existing reactive adaptive delay logic penalized future requests heavily after a 429 was hit, leading to low throughput and frequent blocks.
+The sequential scraper was hitting a hard rate limit on the Sauspiel server approximately every 20 requests. The existing reactive logic tripling inter-request wait times was inefficient, causing long stalls and low throughput.
 
 ## Symptoms
 - HTTP 429 Too Many Requests errors.
 - Scraper halts or enters long cooling-off periods (60s+).
-- Low throughput (~12-15 games per minute) when hitting limits.
+- Inconsistent performance due to reactive rather than proactive throttling.
 
 ## What Didn't Work
-- **Reactive Adaptive Delay:** Tripling the inter-request wait time *after* a 429 was hit was too late and too harsh.
-- **Burst-and-Pause:** Attempting to burst to the 20-request limit and then pausing for 60s is prone to "sliding window" resets and bot-detection heuristics.
-- **Simple threading:** Multiple threads without a centralized governor hit the 20-request burst limit nearly instantly.
+- **Reactive Backoff:** Waiting for a 429 to slow down is "too little, too late."
+- **Burst-and-Pause:** Attempting to burst to the limit and then pausing is prone to sliding-window triggers and bot-detection heuristics.
 
 ## Solution
 Implemented a centralized `RateLimiter` using a **Steady Global Pacing** strategy.
 
 ### 1. Steady Global Pacing
-Instead of bursting, the `RateLimiter` enforces a minimum interval (default 2.0s) between the *start* of any two requests across all threads. This ensures a steady 30 RPM that stays proactively under the server's sliding-window threshold, achieving 100 games in ~3.4 minutes without 429s.
+The `RateLimiter` enforces a minimum interval (default 2.0s) between the *start* of any two requests across all threads. This proactively stays under the server's sliding-window threshold, achieving a steady 30 RPM without triggering 429s.
 
 ### 2. Thread-Safe Orchestration
-- **ThreadPoolExecutor:** Orchestrates parallel game fetching, allowing parsing and DB writes to overlap with network latency.
-- **Double-Check Locking:** Uses `threading.RLock` in `SauspielScraper` for reentrant thread safety during session re-authentication.
-- **SQLite Synchronization:** Added application-level locking in `Database` to prevent write collisions.
-
-### 3. Calibration Metrics
-Added a summary at the end of every run reporting Average RPM, total 429s, and total wait time to allow for empirical optimization.
+- **ThreadPoolExecutor:** Orchestrates parallel workers to overlap network I/O with HTML parsing and DB writes.
+- **RLock for Sessions:** Uses `threading.RLock` in `SauspielScraper` for reentrant thread safety during session re-authentication.
+- **SQLite Locking:** Synchronizes database writes to prevent "database is locked" errors.
 
 ## Why This Works
-Steady pacing is more stable than "Burst and Wait" because it never triggers the server's anti-burst filters. By staying proactively under the limit, we avoid the aggressive WAF cooling-off periods entirely. Concurrency allows us to overlap the network latency of one request with the heavy HTML parsing of another.
+Steady pacing is the most stable strategy for servers with sliding-window rate limits. By ensuring a consistent gap between requests, we avoid the "traffic spikes" that trigger WAF burst filters. Concurrency ensures the scraper is always ready to fire the next request the moment the pacing interval expires.
 
 ## Prevention
-- **Proactive Throttling:** Always use a global rate limiter for scrapers targeting sensitive endpoints.
-- **Steady Pacing:** Prefer a steady request interval over rapid bursts to mimic human-like browsing patterns.
-- **Reentrant Locks:** Use `RLock` when a locked method calls another method that also requires the same lock, but prefer decomposing into public safe wrappers and private unlocked implementations for better clarity.
+- **Pacing over Bursting:** When scraping, always prefer a steady, low-velocity stream of requests over high-velocity bursts.
+- **Global Rate Limiting:** In multi-threaded environments, throttling must be managed by a centralized governor to be effective.
+- **Thread Safety:** Ensure shared resources like session cookie jars and database connections are properly locked.
 
 ## Related Issues
 - `docs/solutions/architecture-patterns/architectural-decoupling-pydantic-2026-04-25.md`
