@@ -1,6 +1,6 @@
 import json
-import random
 import re
+import threading
 import time
 from datetime import datetime
 from pathlib import Path
@@ -10,6 +10,7 @@ import requests
 from bs4 import BeautifulSoup, Tag
 
 from sauspiel_scraper.models import Game, GameMeta, GamePreview, Trick
+from sauspiel_scraper.rate_limiter import RateLimiter
 
 CARD_MAP = {
     "Eichel-Sau": "E-A",
@@ -62,9 +63,15 @@ class SauspielScraper:
     BASE_URL = "https://www.sauspiel.de"
     LOGIN_URL = "https://www.sauspiel.de/login"
 
-    def __init__(self, username: str = "", password: str = ""):
+    def __init__(
+        self,
+        username: str = "",
+        password: str = "",
+        rate_limiter: RateLimiter | None = None,
+    ):
         self.username = username
         self.password = password
+        self.rate_limiter = rate_limiter or RateLimiter()
         self.session = requests.Session()
         self.session.headers.update(
             {
@@ -76,27 +83,7 @@ class SauspielScraper:
             }
         )
         self.user_id: str | None = None
-        # Adaptive delay settings
-        self.current_delay = 1.0  # Initial delay in seconds
-        self.min_delay = 0.5
-        self.max_delay = 15.0
-
-    def _wait_adaptive(self) -> None:
-        """Wait for the current adaptive delay with a small random jitter."""
-        wait_time = self.current_delay + (random.random() * 0.5)
-        time.sleep(wait_time)
-
-    def _adjust_delay(self, success: bool, rate_limited: bool = False) -> None:
-        """Adjust the adaptive delay based on the outcome of a request."""
-        if rate_limited:
-            # Harsh penalty for hitting a 429
-            self.current_delay = min(self.max_delay, self.current_delay * 3.0)
-        elif success:
-            # Gradually speed up (reduce delay by 5%)
-            self.current_delay = max(self.min_delay, self.current_delay * 0.95)
-        else:
-            # Slight penalty for other errors
-            self.current_delay = min(self.max_delay, self.current_delay * 1.5)
+        self._lock = threading.RLock()
 
     def encode_card(self, title: Any) -> str | None:
         if not title:
@@ -106,8 +93,13 @@ class SauspielScraper:
 
     def is_logged_in(self) -> bool:
         try:
+            self.rate_limiter.acquire()
             resp = self.session.get(self.BASE_URL)
+            if resp.status_code == 429:
+                self.rate_limiter.report_429()
+                return False
             if "Ausloggen" in resp.text:
+                self.rate_limiter.report_success()
                 self._identify_user_id(resp.text)
                 return True
         except Exception:
@@ -115,64 +107,96 @@ class SauspielScraper:
         return False
 
     def login(self) -> bool:
-        resp = self.session.get(self.BASE_URL)
-        if "Ausloggen" in resp.text:
-            self._identify_user_id(resp.text)
-            return True
-        soup = BeautifulSoup(resp.text, "html.parser")
-        token_meta = soup.find("meta", {"name": "csrf-token"})
-        token = token_meta["content"] if token_meta and isinstance(token_meta, Tag) else None
-        if not token:
-            resp = self.session.get(f"{self.BASE_URL}/login")
+        with self._lock:
+            # Double-check if another thread logged in while we waited for the lock
+            self.rate_limiter.acquire()
+            resp = self.session.get(self.BASE_URL)
+            if resp.status_code == 429:
+                print("DEBUG: Rate limited during login check (429)")
+                self.rate_limiter.report_429()
+                return False
+
+            if "Ausloggen" in resp.text:
+                self.rate_limiter.report_success()
+                self._identify_user_id(resp.text)
+                return True
+
             soup = BeautifulSoup(resp.text, "html.parser")
-            token_input = soup.find("input", {"name": "authenticity_token"})
-            token = token_input["value"] if token_input and isinstance(token_input, Tag) else None
-        payload = {
-            "utf8": "✓",
-            "authenticity_token": token,
-            "login": self.username,
-            "password": self.password,
-            "remember_me": "1",
-            "commit": "Anmelden",
-        }
-        resp = self.session.post(f"{self.BASE_URL}/login", data=payload, allow_redirects=True)
-        success = "Ausloggen" in resp.text
-        if success:
-            self._identify_user_id(resp.text)
-        return success
+            token_meta = soup.find("meta", {"name": "csrf-token"})
+            token = token_meta["content"] if token_meta and isinstance(token_meta, Tag) else None
+            if not token:
+                self.rate_limiter.acquire()
+                resp = self.session.get(f"{self.BASE_URL}/login")
+                if resp.status_code == 429:
+                    self.rate_limiter.report_429()
+                    return False
+                soup = BeautifulSoup(resp.text, "html.parser")
+                token_input = soup.find("input", {"name": "authenticity_token"})
+                token = (
+                    token_input["value"] if token_input and isinstance(token_input, Tag) else None
+                )
+
+            payload = {
+                "utf8": "✓",
+                "authenticity_token": token,
+                "login": self.username,
+                "password": self.password,
+                "remember_me": "1",
+                "commit": "Anmelden",
+            }
+            self.rate_limiter.acquire()
+            resp = self.session.post(f"{self.BASE_URL}/login", data=payload, allow_redirects=True)
+            if resp.status_code == 429:
+                self.rate_limiter.report_429()
+                return False
+
+            success = "Ausloggen" in resp.text
+            if success:
+                self.rate_limiter.report_success()
+                self._identify_user_id(resp.text)
+            else:
+                print(
+                    f"DEBUG: Login failed with status {resp.status_code}. "
+                    f"Content length: {len(resp.text)}"
+                )
+
+            return success
 
     def _identify_user_id(self, html: str) -> None:
-        soup = BeautifulSoup(html, "html.parser")
-        if not self.username:
-            user_el = soup.find("span", class_="topbar-username-mobile")
-            if user_el:
-                self.username = user_el.get_text().strip()
+        with self._lock:
+            soup = BeautifulSoup(html, "html.parser")
+            if not self.username:
+                user_el = soup.find("span", class_="topbar-username-mobile")
+                if user_el:
+                    self.username = user_el.get_text().strip()
 
-        me_link = soup.find("a", attrs={"data-username": self.username})
-        if not me_link:
-            for a in soup.find_all("a", href=re.compile(r"^/profile/")):
-                if self.username.lower() in a.get_text().lower():
-                    me_link = a
-                    break
+            me_link = soup.find("a", attrs={"data-username": self.username})
+            if not me_link:
+                for a in soup.find_all("a", href=re.compile(r"^/profile/")):
+                    if self.username.lower() in a.get_text().lower():
+                        me_link = a
+                        break
 
-        if me_link and isinstance(me_link, Tag) and me_link.has_attr("data-userid"):
-            self.user_id = str(me_link["data-userid"])
-        else:
-            match = re.search(rf'data-userid="(\d+)"[^>]*>{self.username}', html, re.I)
-            if match:
-                self.user_id = match.group(1)
+            if me_link and isinstance(me_link, Tag) and me_link.has_attr("data-userid"):
+                self.user_id = str(me_link["data-userid"])
+            else:
+                match = re.search(rf'data-userid="(\d+)"[^>]*>{self.username}', html, re.I)
+                if match:
+                    self.user_id = match.group(1)
 
     def get_session_data(self) -> dict[str, Any]:
-        return {
-            "cookies": self.session.cookies.get_dict(),
-            "username": self.username,
-            "user_id": self.user_id,
-        }
+        with self._lock:
+            return {
+                "cookies": self.session.cookies.get_dict(),
+                "username": self.username,
+                "user_id": self.user_id,
+            }
 
     def load_session_data(self, data: dict[str, Any]) -> None:
-        self.session.cookies.update(data["cookies"])
-        self.username = data.get("username", "")
-        self.user_id = data.get("user_id")
+        with self._lock:
+            self.session.cookies.update(data["cookies"])
+            self.username = data.get("username", "")
+            self.user_id = data.get("user_id")
 
     def save_session(self, file_path: Path) -> None:
         file_path.parent.mkdir(parents=True, exist_ok=True)
@@ -227,15 +251,18 @@ class SauspielScraper:
                 "X-Requested-With": "XMLHttpRequest",
                 "Referer": f"{self.BASE_URL}/spiele",
             }
-            self._wait_adaptive()
+            self.rate_limiter.acquire()
             resp = self.session.get(f"{self.BASE_URL}/spiele", params=params, headers=headers)
 
             if resp.status_code == 200:
-                self._adjust_delay(success=True)
+                self.rate_limiter.report_success()
             elif resp.status_code == 429:
-                self._adjust_delay(success=False, rate_limited=True)
+                retry_after = resp.headers.get("Retry-After")
+                self.rate_limiter.report_429(int(retry_after) if retry_after else None)
+                continue
             else:
-                self._adjust_delay(success=False)
+                # Other error
+                pass
 
             soup = BeautifulSoup(resp.text, "html.parser")
             items = soup.find_all("div", class_="games-item")
@@ -309,26 +336,15 @@ class SauspielScraper:
 
         attempt = 0
         while attempt < max_retries:
-            self._wait_adaptive()
+            self.rate_limiter.acquire()
             resp = self.session.get(url, allow_redirects=True)
 
             if resp.status_code == 429:
-                self._adjust_delay(success=False, rate_limited=True)
                 retry_after = resp.headers.get("Retry-After")
-                wait_time = int(retry_after) + 1 if retry_after else 10
-                msg = (
-                    f"Rate limited (429). Waiting {wait_time}s for game {game_id}. "
-                    f"New adaptive delay: {self.current_delay:.1f}s"
-                )
-                if log_func:
-                    log_func(msg)
-                else:
-                    print(f"DEBUG: {msg}")
-                time.sleep(wait_time)
+                self.rate_limiter.report_429(int(retry_after) if retry_after else None)
                 continue
 
             if resp.status_code != 200:
-                self._adjust_delay(success=False)
                 attempt += 1
                 if attempt >= max_retries:
                     raise RuntimeError(f"Failed to fetch game {game_id}: Status {resp.status_code}")
@@ -336,7 +352,7 @@ class SauspielScraper:
                 continue
 
             # Success!
-            self._adjust_delay(success=True)
+            self.rate_limiter.report_success()
             if "Anmelden" in resp.text and "Ausloggen" not in resp.text:
                 if log_func:
                     log_func(f"Session expired for {game_id}. Re-logging in...")

@@ -1,3 +1,4 @@
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated
@@ -43,6 +44,7 @@ def scrape(
     count: Annotated[int | None, typer.Option("--count", "-c")] = 20,
     since: Annotated[str | None, typer.Option("--since", "-s")] = None,
     db_path: Annotated[Path, typer.Option("--db")] = Path("output/sauspiel.db"),
+    concurrency: Annotated[int, typer.Option("--concurrency", "-j")] = 3,
 ) -> None:
     """Scrape games and save them to a SQLite database."""
     since_dt = datetime.strptime(since, "%d.%m.%Y") if since else None
@@ -61,7 +63,22 @@ def scrape(
         console.print("[yellow]No new games to scrape.[/]")
         return
 
-    console.print(f"Scraping {len(new_games)} new games...")
+    console.print(f"Scraping {len(new_games)} new games (concurrency={concurrency})...")
+
+    def scrape_single_game(info, progress, task_id):
+        gid = info.game_id
+        try:
+            data = scraper.scrape_game(gid, info, log_func=None)
+            if data:
+                db.save_game(data)
+            progress.update(task_id, description=f"Done {gid}")
+            return True
+        except Exception as e:
+            console.print(f"\n[bold red]Error for {gid}: {e}[/]")
+            return False
+        finally:
+            progress.advance(task_id)
+
     with Progress(
         SpinnerColumn(),
         TextColumn("{task.description}"),
@@ -70,20 +87,20 @@ def scrape(
         console=console,
     ) as progress:
         task = progress.add_task("Scraping...", total=len(new_games))
-        for info in new_games:
-            gid = info.game_id
-            progress.update(task, description=f"Scraping {gid}")
-            try:
-                # Core method now handles retries and waiting
-                data = scraper.scrape_game(gid, info, log_func=console.print)
-                if data:
-                    db.save_game(data)
-            except Exception as e:
-                console.print(f"\n[bold red]Error for {gid}: {e}[/]")
-                continue
 
-            progress.advance(task)
+        with ThreadPoolExecutor(max_workers=concurrency) as executor:
+            futures = [
+                executor.submit(scrape_single_game, info, progress, task) for info in new_games
+            ]
+            for future in as_completed(futures):
+                future.result()
 
+    stats = scraper.rate_limiter.get_stats()
+    console.print("\n[bold cyan]Calibration Summary:[/]")
+    console.print(f"  Total Requests: {stats.total_requests}")
+    console.print(f"  Total 429s: {stats.total_429s}")
+    console.print(f"  Avg Rate: {stats.requests_per_minute:.2f} RPM")
+    console.print(f"  Total Time Wait: {stats.total_waited_seconds:.1f}s")
     console.print(f"[green]Done! Database updated: {db_path}[/]")
 
 

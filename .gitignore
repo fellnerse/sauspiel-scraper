@@ -20,3 +20,4 @@ output/
 *.html
 !tests/fixtures/*.html
 *.json
+.worktrees
