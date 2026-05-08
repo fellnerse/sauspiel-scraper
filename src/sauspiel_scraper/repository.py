@@ -22,6 +22,47 @@ class Database:
                     data TEXT
                 )
             """)
+            self.conn.execute("""
+                CREATE TABLE IF NOT EXISTS users (
+                    username TEXT PRIMARY KEY,
+                    encrypted_password TEXT,
+                    last_scraped_at TEXT
+                )
+            """)
+            self.conn.commit()
+
+    def save_user(self, username: str, encrypted_password: str) -> None:
+        with self._lock:
+            self.conn.execute(
+                "INSERT OR REPLACE INTO users (username, encrypted_password) VALUES (?, ?)",
+                (username, encrypted_password),
+            )
+            self.conn.commit()
+
+    def get_user(self, username: str) -> dict | None:
+        cursor = self.conn.execute(
+            "SELECT username, encrypted_password, last_scraped_at FROM users WHERE username = ?",
+            (username,),
+        )
+        row = cursor.fetchone()
+        if row:
+            return {
+                "username": row[0],
+                "encrypted_password": row[1],
+                "last_scraped_at": row[2],
+            }
+        return None
+
+    def get_all_users(self) -> list[str]:
+        cursor = self.conn.execute("SELECT username FROM users")
+        return [row[0] for row in cursor.fetchall()]
+
+    def update_last_scraped(self, username: str, timestamp: str) -> None:
+        with self._lock:
+            self.conn.execute(
+                "UPDATE users SET last_scraped_at = ? WHERE username = ?",
+                (timestamp, username),
+            )
             self.conn.commit()
 
     def game_exists(self, game_id: str) -> bool:
@@ -43,8 +84,17 @@ class Database:
             )
             self.conn.commit()
 
-    def get_all_games(self) -> list[Game]:
-        cursor = self.conn.execute("SELECT data FROM games ORDER BY date DESC")
+    def get_all_games(self, username: str | None = None) -> list[Game]:
+        if username:
+            # We use a LIKE query to filter games where the user is one of the players.
+            # In the JSON blob, the players list looks like "players":["user1","user2",...]
+            # Using "%"username"%" helps ensure we match the full username.
+            cursor = self.conn.execute(
+                "SELECT data FROM games WHERE data LIKE ? ORDER BY date DESC",
+                (f'%"players":%"{username}"%',),
+            )
+        else:
+            cursor = self.conn.execute("SELECT data FROM games ORDER BY date DESC")
         games = []
         for row in cursor.fetchall():
             if '"error":' in row[0]:
