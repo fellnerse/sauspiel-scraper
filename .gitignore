@@ -22,3 +22,6 @@ output/
 *.json
 .worktrees
 .serena
+
+# Superpowers Brainstorming
+.superpowers/
