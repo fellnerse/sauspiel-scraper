@@ -21,3 +21,4 @@ output/
 !tests/fixtures/*.html
 *.json
 .worktrees
+.serena
