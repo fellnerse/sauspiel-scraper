@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
 
@@ -24,7 +25,21 @@ active_scrapes = {}
 
 dotenv.load_dotenv()
 
-app = FastAPI(title="Sauspiel Scraper")
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Startup
+    scheduler.start()
+    # Schedule the task to run every 6 hours
+    scheduler.add_job(scrape_all_users, "interval", hours=6, id="scrape_all")
+    print("Scheduler started and job added.")
+    yield
+    # Shutdown
+    scheduler.shutdown()
+    print("Scheduler shut down.")
+
+
+app = FastAPI(title="Sauspiel Scraper", lifespan=lifespan)
 
 
 def scrape_all_users(username: str | None = None):
@@ -67,20 +82,6 @@ def scrape_all_users(username: str | None = None):
                 print(f"Login failed for {uname} during background scrape")
         except Exception as e:
             print(f"Error in background scrape for {uname}: {e}")
-
-
-@app.on_event("startup")
-async def startup_event():
-    scheduler.start()
-    # Schedule the task to run every 6 hours
-    scheduler.add_job(scrape_all_users, "interval", hours=6, id="scrape_all")
-    print("Scheduler started and job added.")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    scheduler.shutdown()
-    print("Scheduler shut down.")
 
 
 @app.get("/", response_class=HTMLResponse)
