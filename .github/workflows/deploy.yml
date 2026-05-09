@@ -37,6 +37,18 @@ jobs:
           # Use the resolved IP address to bypass container DNS resolution issues
           git_remote_url: "ssh://dokku@${{ steps.resolve.outputs.ip }}:22/sauspiel-scraper"
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
-          # We also need to provide the host key if we use the IP, or let it scan
-          # The action usually does ssh-keyscan.
-          # Since we changed the URL to use IP, ssh-keyscan will use the IP too.
+
+      - name: Sync App Secrets to Dokku
+        run: |
+          # Use ssh directly to set config vars from GitHub Secrets
+          # This ensures that if you ever recreate the Dokku app,
+          # the next deploy will automatically restore these keys.
+          ssh -o StrictHostKeyChecking=no -i private_key dokku@${{ steps.resolve.outputs.ip }} config:set --no-restart sauspiel-scraper \
+            FERNET_KEY=${{ secrets.FERNET_KEY }} \
+            SESSION_SECRET=${{ secrets.SESSION_SECRET }}
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.SSH_PRIVATE_KEY }}
+        # Note: The dokku action creates a 'private_key' file in the workspace
+        # We also need to provide the host key if we use the IP, or let it scan
+        # The action usually does ssh-keyscan.
+        # Since we changed the URL to use IP, ssh-keyscan will use the IP too.
