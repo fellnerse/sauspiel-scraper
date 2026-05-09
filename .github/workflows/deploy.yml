@@ -20,6 +20,9 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
 
+      - name: test connection
+        run: ping ${{ secrets.DOKKU_HOST }} -c 2
+
       - name: Push to Dokku
         uses: dokku/github-action@master
         with:
