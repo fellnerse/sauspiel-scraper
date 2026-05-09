@@ -26,7 +26,9 @@ def run_migrations_offline() -> None:
     if not url:
         url = config.get_main_option("sqlalchemy.url")
     elif url.startswith("postgres://"):
-        url = url.replace("postgres://", "postgresql://", 1)
+        url = url.replace("postgres://", "postgresql+psycopg://", 1)
+    elif url.startswith("postgresql://") and "+psycopg" not in url:
+        url = url.replace("postgresql://", "postgresql+psycopg://", 1)
 
     context.configure(
         url=url,
@@ -45,7 +47,9 @@ def run_migrations_online() -> None:
     url = os.environ.get("DATABASE_URL")
     if url:
         if url.startswith("postgres://"):
-            url = url.replace("postgres://", "postgresql://", 1)
+            url = url.replace("postgres://", "postgresql+psycopg://", 1)
+        elif url.startswith("postgresql://") and "+psycopg" not in url:
+            url = url.replace("postgresql://", "postgresql+psycopg://", 1)
         config.set_main_option("sqlalchemy.url", url)
 
     connectable = engine_from_config(
