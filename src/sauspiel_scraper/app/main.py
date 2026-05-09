@@ -1,3 +1,4 @@
+import os
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -18,7 +19,7 @@ from sauspiel_scraper.repository import Database
 # Setup
 BASE_DIR = Path(__file__).resolve().parent
 templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
-db = Database()
+db = Database(os.getenv("DATABASE_URL"))
 global_rate_limiter = RateLimiter()
 scheduler = BackgroundScheduler()
 active_scrapes = {}
@@ -184,7 +185,8 @@ def run_app() -> None:
     """
     Entry point for the FastAPI application.
     """
-    uvicorn.run("sauspiel_scraper.app.main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.getenv("PORT", 8000))
+    uvicorn.run("sauspiel_scraper.app.main:app", host="0.0.0.0", port=port, reload=False)
 
 
 if __name__ == "__main__":

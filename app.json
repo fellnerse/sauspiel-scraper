@@ -1,0 +1,5 @@
+{
+  "scripts": {
+    "release": "echo 'Running release hook...'"
+  }
+}

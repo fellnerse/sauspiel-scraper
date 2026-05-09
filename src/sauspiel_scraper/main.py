@@ -1,3 +1,4 @@
+import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime
 from pathlib import Path
@@ -21,7 +22,8 @@ def export(
     output_path: Annotated[Path, typer.Option("--output", "-o")] = Path("output/export.jsonl"),
 ) -> None:
     """Export games from database to JSONL format."""
-    db = Database(db_path)
+    db_url = os.getenv("DATABASE_URL")
+    db = Database(db_url or f"sqlite:///{db_path}")
     games = db.get_all_games()
     if not games:
         console.print("[yellow]No games found in database.[/]")
@@ -46,9 +48,10 @@ def scrape(
     db_path: Annotated[Path, typer.Option("--db")] = Path("output/sauspiel.db"),
     concurrency: Annotated[int, typer.Option("--concurrency", "-j")] = 3,
 ) -> None:
-    """Scrape games and save them to a SQLite database."""
+    """Scrape games and save them to a database."""
     since_dt = datetime.strptime(since, "%d.%m.%Y") if since else None
-    db = Database(db_path)
+    db_url = os.getenv("DATABASE_URL")
+    db = Database(db_url or f"sqlite:///{db_path}")
     scraper = SauspielScraper(username, password)
 
     with console.status(f"Logging in as {username}..."):

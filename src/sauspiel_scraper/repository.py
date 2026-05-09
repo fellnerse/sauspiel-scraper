@@ -1,107 +1,105 @@
-import sqlite3
-import threading
+import os
 from pathlib import Path
+from typing import Optional
+
+from sqlalchemy import Column, String, Text, create_engine
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 from sauspiel_scraper.models import Game
 
+Base = declarative_base()
+
+
+class GameModel(Base):
+    __tablename__ = "games"
+
+    game_id = Column(String, primary_key=True)
+    date = Column(String)
+    game_type = Column(String)
+    data = Column(Text)
+
+
+class UserModel(Base):
+    __tablename__ = "users"
+
+    username = Column(String, primary_key=True)
+    encrypted_password = Column(String)
+    last_scraped_at = Column(String)
+
 
 class Database:
-    def __init__(self, db_path: Path = Path("output/sauspiel.db")):
-        db_path.parent.mkdir(parents=True, exist_ok=True)
-        self._lock = threading.Lock()
-        self.conn = sqlite3.connect(db_path, check_same_thread=False)
-        self.create_tables()
+    def __init__(self, db_url: Optional[str] = None):
+        if not db_url:
+            # Fallback to local SQLite
+            db_path = Path("output/sauspiel.db")
+            db_path.parent.mkdir(parents=True, exist_ok=True)
+            db_url = f"sqlite:///{db_path}"
 
-    def create_tables(self) -> None:
-        with self._lock:
-            self.conn.execute("""
-                CREATE TABLE IF NOT EXISTS games (
-                    game_id TEXT PRIMARY KEY,
-                    date TEXT,
-                    game_type TEXT,
-                    data TEXT
-                )
-            """)
-            self.conn.execute("""
-                CREATE TABLE IF NOT EXISTS users (
-                    username TEXT PRIMARY KEY,
-                    encrypted_password TEXT,
-                    last_scraped_at TEXT
-                )
-            """)
-            self.conn.commit()
+        # Handle postgres:// vs postgresql://
+        if db_url.startswith("postgres://"):
+            db_url = db_url.replace("postgres://", "postgresql://", 1)
+
+        self.engine = create_engine(db_url)
+        Base.metadata.create_all(self.engine)
+        self.Session = sessionmaker(bind=self.engine)
 
     def save_user(self, username: str, encrypted_password: str) -> None:
-        with self._lock:
-            self.conn.execute(
-                "INSERT OR REPLACE INTO users (username, encrypted_password) VALUES (?, ?)",
-                (username, encrypted_password),
-            )
-            self.conn.commit()
+        with self.Session() as session:
+            user = UserModel(username=username, encrypted_password=encrypted_password)
+            session.merge(user)
+            session.commit()
 
     def get_user(self, username: str) -> dict | None:
-        cursor = self.conn.execute(
-            "SELECT username, encrypted_password, last_scraped_at FROM users WHERE username = ?",
-            (username,),
-        )
-        row = cursor.fetchone()
-        if row:
-            return {
-                "username": row[0],
-                "encrypted_password": row[1],
-                "last_scraped_at": row[2],
-            }
-        return None
+        with self.Session() as session:
+            user = session.query(UserModel).filter(UserModel.username == username).first()
+            if user:
+                return {
+                    "username": user.username,
+                    "encrypted_password": user.encrypted_password,
+                    "last_scraped_at": user.last_scraped_at,
+                }
+            return None
 
     def get_all_users(self) -> list[str]:
-        cursor = self.conn.execute("SELECT username FROM users")
-        return [row[0] for row in cursor.fetchall()]
+        with self.Session() as session:
+            users = session.query(UserModel.username).all()
+            return [u.username for u in users]
 
     def update_last_scraped(self, username: str, timestamp: str) -> None:
-        with self._lock:
-            self.conn.execute(
-                "UPDATE users SET last_scraped_at = ? WHERE username = ?",
-                (timestamp, username),
-            )
-            self.conn.commit()
+        with self.Session() as session:
+            user = session.query(UserModel).filter(UserModel.username == username).first()
+            if user:
+                user.last_scraped_at = timestamp
+                session.commit()
 
     def game_exists(self, game_id: str) -> bool:
-        # SELECT is generally safe without a lock in WAL mode or if we don't mind stale reads,
-        # but for consistency we could also lock here. Given the plan, we'll keep it light.
-        cursor = self.conn.execute("SELECT 1 FROM games WHERE game_id = ?", (game_id,))
-        return cursor.fetchone() is not None
+        with self.Session() as session:
+            return session.query(GameModel).filter(GameModel.game_id == game_id).first() is not None
 
     def save_game(self, game: Game) -> None:
-        with self._lock:
-            self.conn.execute(
-                "INSERT OR REPLACE INTO games (game_id, date, game_type, data) VALUES (?, ?, ?, ?)",
-                (
-                    game.game_id,
-                    game.meta.date.isoformat(),
-                    game.game_type or "",
-                    game.model_dump_json(exclude_unset=True),
-                ),
+        with self.Session() as session:
+            game_obj = GameModel(
+                game_id=game.game_id,
+                date=game.meta.date.isoformat(),
+                game_type=game.game_type or "",
+                data=game.model_dump_json(exclude_unset=True),
             )
-            self.conn.commit()
+            session.merge(game_obj)
+            session.commit()
 
     def get_all_games(self, username: str | None = None) -> list[Game]:
-        if username:
-            # We use a LIKE query to filter games where the user is one of the players.
-            # In the JSON blob, the players list looks like "players":["user1","user2",...]
-            # Using "%"username"%" helps ensure we match the full username.
-            cursor = self.conn.execute(
-                "SELECT data FROM games WHERE data LIKE ? ORDER BY date DESC",
-                (f'%"players":%"{username}"%',),
-            )
-        else:
-            cursor = self.conn.execute("SELECT data FROM games ORDER BY date DESC")
-        games = []
-        for row in cursor.fetchall():
-            if '"error":' in row[0]:
-                continue
-            try:
-                games.append(Game.model_validate_json(row[0]))
-            except Exception:
-                # Graceful fallback: ignore invalid historical rows as specified in the plan
-                continue
-        return games
+        with self.Session() as session:
+            query = session.query(GameModel)
+            if username:
+                query = query.filter(GameModel.data.like(f'%"players":%"{username}"%'))
+            
+            rows = query.order_by(GameModel.date.desc()).all()
+            games = []
+            for row in rows:
+                if '"error":' in row.data:
+                    continue
+                try:
+                    games.append(Game.model_validate_json(row.data))
+                except Exception:
+                    continue
+            return games
