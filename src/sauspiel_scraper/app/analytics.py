@@ -100,7 +100,7 @@ def render_analytics(games: list[ProcessedGame]) -> dict[str, str]:
     # Ensure date is datetime for plotting
     df["date"] = pd.to_datetime(df["date"])
     df = df.sort_values("date")
-    
+
     # Cumulative Profit
     df["cumulative_profit"] = df["value"].cumsum() / 100.0
 
@@ -115,8 +115,8 @@ def render_analytics(games: list[ProcessedGame]) -> dict[str, str]:
 
     # Game Type Distribution
     fig_types = px.pie(
-        df, 
-        names="type", 
+        df,
+        names="type",
         title="Game Type Distribution",
         template="plotly_white",
     )

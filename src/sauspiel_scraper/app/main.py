@@ -1,4 +1,3 @@
-import os
 from datetime import datetime
 from pathlib import Path
 
@@ -45,8 +44,12 @@ def scrape_all_users(username: str | None = None):
 
             if scraper.login():
                 # Fetch new game previews for the current month only
-                first_of_month = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-                new_games = scraper.get_game_list_paginated(max_new=100, since=first_of_month, db=db)
+                first_of_month = datetime.now().replace(
+                    day=1, hour=0, minute=0, second=0, microsecond=0
+                )
+                new_games = scraper.get_game_list_paginated(
+                    max_new=100, since=first_of_month, db=db
+                )
 
                 count = 0
                 for info in new_games:

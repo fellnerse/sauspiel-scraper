@@ -14,6 +14,7 @@ def _get_fernet() -> Fernet:
     except Exception as e:
         raise ValueError(f"Invalid FERNET_KEY: {e}") from e
 
+
 def encrypt_password(password: str) -> str:
     """
     Encrypts a password string using Fernet symmetric encryption.
@@ -23,6 +24,7 @@ def encrypt_password(password: str) -> str:
     token = f.encrypt(password.encode())
     return token.decode()
 
+
 def decrypt_password(token: str) -> str:
     """
     Decrypts a Fernet token back to the original password string.
@@ -30,6 +32,7 @@ def decrypt_password(token: str) -> str:
     f = _get_fernet()
     password = f.decrypt(token.encode() if isinstance(token, str) else token)
     return password.decode()
+
 
 def hash_password(password: str) -> str:
     """
@@ -39,6 +42,7 @@ def hash_password(password: str) -> str:
     salt = secrets.token_hex(16)
     hash_value = hashlib.sha256((salt + password).encode()).hexdigest()
     return f"{salt}:{hash_value}"
+
 
 def verify_password(password: str, hashed_password: str) -> bool:
     """
