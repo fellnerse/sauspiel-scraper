@@ -2,10 +2,11 @@ name: Deploy to Dokku
 
 on:
   push:
-    branches: [main]
+    # branches: [main]
 
 jobs:
   deploy:
+    environment: dokku
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,5 +24,5 @@ jobs:
         uses: dokku/github-action@master
         with:
           # The address of your Dokku server (e.g. scraper.your-tailnet.ts.net)
-          git_remote_url: 'ssh://dokku@${{ secrets.DOKKU_HOST }}:22/sauspiel-scraper'
+          git_remote_url: "ssh://dokku@${{ secrets.DOKKU_HOST }}:22/sauspiel-scraper"
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
