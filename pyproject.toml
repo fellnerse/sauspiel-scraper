@@ -8,19 +8,26 @@ authors = [
 ]
 requires-python = ">=3.14"
 dependencies = [
+    "apscheduler>=3.11.0",
     "beautifulsoup4>=4.14.3",
+    "cryptography>=44.0.2",
+    "fastapi>=0.115.11",
+    "itsdangerous>=2.2.0",
+    "jinja2>=3.1.6",
     "pandas>=3.0.2",
     "plotly>=6.7.0",
     "pydantic>=2.13.3",
     "python-dotenv>=1.2.2",
+    "python-multipart>=0.0.20",
     "requests>=2.33.1",
-    "streamlit>=1.56.0",
     "typer>=0.24.1",
+    "uvicorn>=0.34.0",
 ]
 
 [project.scripts]
 sauspiel-scraper = "sauspiel_scraper.main:app"
 sauspiel-web = "sauspiel_scraper.app.main:run_app"
+sauspiel-keygen = "sauspiel_scraper.app.keygen:generate_key"
 
 [tool.ruff]
 line-length = 100
@@ -36,6 +43,7 @@ build-backend = "uv_build"
 [dependency-groups]
 dev = [
     "commitizen>=4.2.1",
+    "httpx>=0.28.1",
     "prek>=0.3.10",
     "pytest>=9.0.3",
     "requests-mock>=1.12.1",

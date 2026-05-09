@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+
+{% block title %}Login - Sauspiel Scraper{% endblock %}
+
+{% block content %}
+<article style="max-width: 400px; margin: auto;">
+    <h2>Login</h2>
+    {% if error %}
+        <p style="color: var(--pico-error-color);">{{ error }}</p>
+    {% endif %}
+    <form action="/login" method="post">
+        <label for="username">
+            Username
+            <input type="text" id="username" name="username" placeholder="Sauspiel Username" required>
+        </label>
+        <label for="password">
+            Password
+            <input type="password" id="password" name="password" placeholder="Sauspiel Password" required>
+        </label>
+        <button type="submit">Login & Sync</button>
+    </form>
+    <p><small>Your password is encrypted and only used for scraping.</small></p>
+</article>
+{% endblock %}

@@ -19,6 +19,10 @@ dist/
 output/
 *.html
 !tests/fixtures/*.html
+!src/**/templates/*.html
 *.json
 .worktrees
 .serena
+
+# Superpowers Brainstorming
+.superpowers/
