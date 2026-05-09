@@ -1,18 +1,13 @@
 import pytest
-from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from sauspiel_scraper.app.main import app
 from sauspiel_scraper.core import SauspielScraper
 
-# Setup a dummy FERNET_KEY for tests
-TEST_KEY = Fernet.generate_key().decode()
-
 
 @pytest.fixture(autouse=True)
-def mock_fernet_key(monkeypatch):
-    monkeypatch.setenv("FERNET_KEY", TEST_KEY)
-    # Also mock SauspielScraper.login to always succeed in these web tests
+def mock_scraper_login(monkeypatch):
+    # Mock SauspielScraper.login to always succeed in these web tests
     monkeypatch.setattr(SauspielScraper, "login", lambda self: True)
 
 
