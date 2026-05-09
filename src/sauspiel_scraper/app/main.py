@@ -15,15 +15,18 @@ from sauspiel_scraper.core import SauspielScraper
 from sauspiel_scraper.rate_limiter import RateLimiter
 from sauspiel_scraper.repository import Database
 
+# Load environment variables as early as possible
+APP_DIR = Path(__file__).resolve().parent
+PROJECT_ROOT = APP_DIR.parents[2]
+dotenv.load_dotenv(PROJECT_ROOT / ".env")
+
 # Setup
-BASE_DIR = Path(__file__).resolve().parent
-templates = Jinja2Templates(directory=str(BASE_DIR / "templates"))
+templates = Jinja2Templates(directory=str(APP_DIR / "templates"))
+
 db = Database()
 global_rate_limiter = RateLimiter()
 scheduler = BackgroundScheduler()
 active_scrapes = {}
-
-dotenv.load_dotenv()
 
 
 @asynccontextmanager
