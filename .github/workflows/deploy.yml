@@ -20,12 +20,23 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
 
-      - name: test connection
-        run: ping ${{ secrets.DOKKU_HOST }} -c 2
+      - name: Resolve Dokku Host IP
+        id: resolve
+        run: |
+          IP=$(dig +short ${{ secrets.DOKKU_HOST }} | tail -n1)
+          if [ -z "$IP" ]; then
+            # Fallback to getent if dig is not available or fails
+            IP=$(getent hosts ${{ secrets.DOKKU_HOST }} | awk '{ print $1 }')
+          fi
+          echo "ip=$IP" >> $GITHUB_OUTPUT
+          echo "Resolved ${{ secrets.DOKKU_HOST }} to $IP"
 
       - name: Push to Dokku
         uses: dokku/github-action@master
         with:
-          # The address of your Dokku server (e.g. scraper.your-tailnet.ts.net)
-          git_remote_url: "ssh://dokku@${{ secrets.DOKKU_HOST }}:22/sauspiel-scraper"
+          # Use the resolved IP address to bypass container DNS resolution issues
+          git_remote_url: "ssh://dokku@${{ steps.resolve.outputs.ip }}:22/sauspiel-scraper"
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
+          # We also need to provide the host key if we use the IP, or let it scan
+          # The action usually does ssh-keyscan.
+          # Since we changed the URL to use IP, ssh-keyscan will use the IP too.
