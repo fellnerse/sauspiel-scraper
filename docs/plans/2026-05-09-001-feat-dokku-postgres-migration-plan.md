@@ -23,12 +23,19 @@ The project was originally planned for Render's free tier, which does not offer 
 
 ## Requirements Trace
 
-- R1. Update Python dependencies to include SQLAlchemy, Alembic, and a PostgreSQL driver.
+### Core Migration & Data Layer
 - R2. Refactor `repository.py` to use SQLAlchemy ORM instead of raw `sqlite3` queries.
 - R3. Ensure the database connection automatically supports the `DATABASE_URL` environment variable provided by Dokku.
-- R4. Document the Proxmox/Dokku setup and deployment commands.
-- R5. Configure the application for Dokku deployment (Procfile, dynamic PORT).
 - R6. Provide a path for existing data migration.
+- R7. **(NEW)** Secure user sessions with signed cookies (SessionMiddleware) to prevent identity spoofing in public-facing deployment.
+
+### Infrastructure & Dependencies
+- R1. Update Python dependencies to include SQLAlchemy, Alembic, and Psycopg 3 (`psycopg[binary]`).
+- R5. Configure the application for Dokku deployment (Procfile, dynamic PORT).
+- R8. **(NEW)** Downgrade Python requirement to `^3.12` for compatibility with stable buildpacks.
+
+### Documentation
+- R4. Document the Proxmox/Dokku setup and deployment commands.
 
 ---
 
@@ -48,30 +55,40 @@ The project was originally planned for Render's free tier, which does not offer 
 
 ### Relevant Code and Patterns
 
-- `src/sauspiel_scraper/repository.py`: Currently handles raw `sqlite3` connections and executes raw SQL for `games` and `users` tables. The `Database` class acts as the central interface.
-- `src/sauspiel_scraper/app/main.py`: The FastAPI application entry point, which currently relies on a hardcoded port.
+- `src/sauspiel_scraper/repository.py`: Currently handles raw `sqlite3` connections and executes raw SQL.
+- `src/sauspiel_scraper/app/main.py`: The FastAPI application entry point.
 
 ---
 
 ## Key Technical Decisions
 
-- **ORM Choice**: SQLAlchemy. It provides a robust abstraction layer, making it trivial to switch between SQLite for local development and PostgreSQL for production.
-- **Schema Management**: Alembic will be introduced to manage schema evolution safely in production, ensuring changes to the models can be consistently applied.
-- **Driver**: `psycopg2-binary` for standard synchronous PostgreSQL connections.
-- **JSON Column & Querying**: Use SQLAlchemy's `JSON` type configured with a `JSONB` variant for PostgreSQL to ensure semantic query correctness and allow for GIN indexing. The SQLite fallback will still utilize text-based representations. Querying for games by player will conditionally use JSON containment (`contains`) on PostgreSQL and string matching (`LIKE`) on SQLite.
-- **Connection Logic**: `repository.py` will read `os.environ.get("DATABASE_URL")`. If it exists, it connects via PostgreSQL. Dokku provides `postgres://` URLs, which will be auto-replaced with `postgresql://` to satisfy modern SQLAlchemy requirements.
-- **Session Management**: Transition away from `threading.Lock` to using proper SQLAlchemy session management (e.g., `sessionmaker`) to ensure thread-safe operations, especially important given the background tasks scheduling.
-- **Deployment Compatibility**: Dokku requires dynamic port binding via the `$PORT` environment variable and a `Procfile` to identify the correct web process. These will be explicitly configured.
+- **ORM Choice**: SQLAlchemy 2.0.
+- **Driver Choice**: **Psycopg 3** (`psycopg[binary]`).
+- **FastAPI Concurrency**: Transition database-bound web routes from `async def` to standard `def`. This allows FastAPI to run these operations in a dedicated threadpool.
+- **Schema Management**:
+    - **Development/Test**: Use `Base.metadata.create_all()` for rapid iteration and local SQLite.
+    - **Production**: Use **Alembic** as the authoritative source. Configure `alembic/env.py` with `render_as_batch=True` to support SQLite.
+- **Dialect Compatibility**:
+    - **JSONB Column**: Use SQLAlchemy's `JSON` type with a `JSONB` variant.
+    - **GIN Indexing**: Explicitly wrap GIN index definitions with `postgresql_using='gin'`. SQLAlchemy will ignore this when targeting SQLite.
+    - **Query Logic**: Implement dialect-aware filtering in the repository. Use `JSONB.contains` for Postgres and `LIKE` for SQLite.
+- **Security**:
+    - **Signed Sessions**: Replace raw `username` cookies with FastAPI `SessionMiddleware` and a `SESSION_SECRET` (from environment).
+    - **SSL**: Enforce `sslmode=require` for PostgreSQL connections in production.
+- **Connection Logic**:
+    - **URL Sanitization**: Replace `postgres://` with `postgresql://`.
+    - **Resilience**: Configure `create_engine` with `pool_pre_ping=True`.
+- **Deployment Compatibility**: Dokku requires dynamic port binding via the `$PORT` environment variable and a `Procfile`.
 
 ---
 
 ## Implementation Units
 
-- U1. **Add Database Dependencies**
+- U1. **Add Database and Security Dependencies**
 
-**Goal:** Include SQLAlchemy, Alembic, and PostgreSQL driver in the project.
+**Goal:** Include SQLAlchemy, Alembic, Psycopg 3, and session support in the project.
 
-**Requirements:** R1
+**Requirements:** R1, R8
 
 **Dependencies:** None
 
@@ -80,11 +97,11 @@ The project was originally planned for Render's free tier, which does not offer 
 - Modify: `uv.lock` (via `uv sync`)
 
 **Approach:**
-- Add `sqlalchemy`, `alembic`, and `psycopg2-binary` to the `dependencies` array.
-- The implementer will need to run `uv sync` to generate the updated lockfile.
+- Add `sqlalchemy`, `alembic`, `psycopg[binary]`, and `itsdangerous` (for session signing).
+- Update `pyproject.toml` to `python = "^3.12"`.
 
 **Verification:**
-- `uv run python -c "import sqlalchemy, psycopg2, alembic"` succeeds.
+- `uv run python -c "import sqlalchemy, psycopg, alembic"` succeeds.
 
 ---
 
@@ -98,28 +115,32 @@ The project was originally planned for Render's free tier, which does not offer 
 
 **Files:**
 - Modify: `src/sauspiel_scraper/repository.py`
-- Modify: `tests/test_repository.py` (if any SQL-specific mocks/tests exist)
+- Modify: `src/sauspiel_scraper/app/main.py` (update route signatures)
+- Modify: `tests/test_repository.py`
 - Create: `alembic.ini` and `alembic/env.py` (via `alembic init`)
 
 **Approach:**
 - Define declarative base models for `GameModel` and `UserModel`.
-  - `GameModel`: `game_id` (String, PK), `date` (String), `game_type` (String), `data` (JSON, with JSONB variant and GIN index for postgres).
-  - `UserModel`: `username` (String, PK), `encrypted_password` (String), `last_scraped_at` (String).
-- Update `Database` initialization: auto-replace `postgres://` with `postgresql://` in `DATABASE_URL`. Configure `create_engine` with connection pool settings (`pool_pre_ping=True`, `pool_recycle=300`) to handle managed PostgreSQL environments safely.
-- Incorporate `Base.metadata.create_all(self.engine)` upon connection to ensure tables exist, and configure Alembic to track future schema changes.
-- Remove `threading.Lock` and instantiate a standard `sessionmaker` bound to the engine. Refactor all methods to use short-lived sessions (e.g., context managers `with self.Session() as session:`) to prevent connection leaks across background tasks and requests.
-- Update `get_all_games`: use dialect-specific filtering (PostgreSQL uses `data['players'].contains([username])`; SQLite uses `.like()`).
-
-**Patterns to follow:**
-- Keep the exact existing public method signatures of the `Database` class so `main.py` and `app/main.py` do not break.
-
-**Test scenarios:**
-- Happy path: Initializing `Database` without `DATABASE_URL` creates a local sqlite file with initialized schema.
-- Happy path: Saving and retrieving a game uses ORM and accurately persists JSON blobs.
-- Integration: Retrieving games filtered by username returns correct results using the dialect-appropriate filter logic.
+  - `GameModel`: `game_id` (String, PK), `date` (DateTime), `game_type` (String), `data` (JSON).
+  - Define GIN index: `Index('idx_games_data_players', GameModel.data['players'], postgresql_using='gin')`.
+- Update `Database` initialization:
+  - Sanitize `DATABASE_URL`.
+  - Configure engine with `pool_pre_ping=True`.
+  - Use `create_all()` ONLY if `DATABASE_URL` is a local SQLite path.
+- Implement `session_scope()` context manager for background workers.
+- Update `src/sauspiel_scraper/app/main.py`:
+  - Change database-accessing routes to standard `def`.
+  - Implement `get_db` dependency for session injection.
+- Update `get_all_games` with dialect check:
+  ```python
+  if self.engine.dialect.name == "postgresql":
+      # use .contains
+  else:
+      # use .like
+  ```
 
 **Verification:**
-- The test suite (`pytest tests/`) passes.
+- The test suite (`pytest tests/`) passes on local SQLite.
 
 ---
 
@@ -133,20 +154,18 @@ The project was originally planned for Render's free tier, which does not offer 
 
 **Files:**
 - Create: `Procfile`
-- Modify: `src/sauspiel_scraper/app/main.py`
 
 **Approach:**
-- Create a `Procfile` at the repository root defining the web process: `web: uvicorn sauspiel_scraper.app.main:app --host 0.0.0.0 --port $PORT`
-- Modify the FastAPI entry point in `src/sauspiel_scraper/app/main.py` (if it contains hardcoded uvicorn run commands) to use `os.environ.get("PORT", 8000)` instead of a hardcoded port.
+- Create a `Procfile` at the repository root: `web: uvicorn sauspiel_scraper.app.main:app --host 0.0.0.0 --port $PORT`
 
 **Verification:**
-- Procfile exists. Running `uvicorn` with `$PORT` set to a custom value successfully binds to that port.
+- Procfile exists.
 
 ---
 
-- U4. **Data Migration Script**
+- U4. **Data Migration Script and Logistics**
 
-**Goal:** Provide a migration path for existing scraped data in local SQLite.
+**Goal:** Provide an idempotent migration path for existing scraped data.
 
 **Requirements:** R6
 
@@ -156,10 +175,8 @@ The project was originally planned for Render's free tier, which does not offer 
 - Create: `scripts/migrate_sqlite_to_postgres.py`
 
 **Approach:**
-- Write a one-off standalone script that:
-  - Connects to the legacy `output/sauspiel.db` SQLite database using standard `sqlite3` or SQLAlchemy.
-  - Connects to the new PostgreSQL database defined by `DATABASE_URL`.
-  - Iterates over the `users` and `games` tables and bulk inserts the records into the new database, gracefully handling existing keys.
+- Write a standalone script using `postgresql.insert(...).on_conflict_do_nothing()`.
+- **Logistics**: Document the step to `scp` the local `output/sauspiel.db` to the Dokku host before running the script.
 
 **Verification:**
 - The script successfully migrates records from a test SQLite database to a test PostgreSQL database.
@@ -178,25 +195,43 @@ The project was originally planned for Render's free tier, which does not offer 
 - Create: `docs/deployment/dokku.md`
 
 **Approach:**
-- Write a Markdown guide detailing how to install Dokku on the VM.
-- Provide the CLI commands to:
-  - Create the dokku app (`dokku apps:create sauspiel-scraper`).
-  - Install the postgres plugin (`sudo dokku plugin:install https://github.com/dokku/dokku-postgres.git`).
-  - Create and link the database (`dokku postgres:create sauspiel-db`, `dokku postgres:link sauspiel-db sauspiel-scraper`).
-  - Add required environment variables (`dokku config:set sauspiel-scraper FERNET_KEY=...`).
-  - Deploy the code using git push.
-  - Run the data migration script inside the dokku container: `dokku run sauspiel-scraper python scripts/migrate_sqlite_to_postgres.py`.
+- Provide CLI commands for app creation, plugin installation, and database linking.
+- **Add Step**: `dokku run sauspiel-scraper alembic upgrade head` before data migration.
+- **Add Step**: Commands to transfer the SQLite database to the Dokku host.
 
 **Verification:**
-- Document exists and accurately covers all required steps.
+- Document exists and covers all steps.
+
+---
+
+- U6. **Secure Session Implementation**
+
+**Goal:** Prevent identity spoofing by signing the user session cookie.
+
+**Requirements:** R7
+
+**Dependencies:** U1
+
+**Files:**
+- Modify: `src/sauspiel_scraper/app/main.py`
+- Modify: `src/sauspiel_scraper/app/auth.py`
+
+**Approach:**
+- Add `SessionMiddleware` to the FastAPI app.
+- Update auth logic to use `request.session["username"] = ...` instead of a raw cookie.
+- Use `SESSION_SECRET` environment variable (with local fallback).
+
+**Verification:**
+- Browsing the dashboard without a valid signed session fails.
+- Changing the username in browser dev tools does not grant access to other accounts.
 
 ---
 
 ## System-Wide Impact
 
-- **Database Engine**: Transitioning from SQLite to PostgreSQL removes file persistence constraints. Local behavior remains identical using SQLAlchemy.
-- **Connection Lifecycle & Concurrency**: We replace the manual `threading.Lock` with robust SQLAlchemy session management. Proper connection pooling configuration (`pool_recycle`, `pool_pre_ping`) mitigates the risk of idle connections dropping in PostgreSQL.
-- **Environment Variables**: The system will actively rely on and sanitize `DATABASE_URL` when deployed, and rely on `PORT` for web server binding.
+- **Event Loop Performance**: By switching web routes to `def`, we ensure the UI remains responsive.
+- **Security Posture**: Moving from raw cookies to signed sessions significantly improves the application's readiness for public internet exposure.
+- **Dialect Resilience**: The codebase remains functional for local SQLite development while exploiting PostgreSQL-specific performance features in production.
 
 ---
 
@@ -204,5 +239,14 @@ The project was originally planned for Render's free tier, which does not offer 
 
 | Risk | Mitigation |
 |------|------------|
-| Dokku injecting `postgres://` instead of `postgresql://` | Handle URL schema replacement programmatically in the `Database` constructor before feeding it to SQLAlchemy. |
-| Performance degradation over time with large dataset | JSONB column and GIN indexing ensures rapid array containment queries for PostgreSQL. |
+| Dialect Incompatibility | Repository uses explicit dialect checks for JSONB containment. |
+| Session Hijacking | Sessions are signed with a secret key; documentation includes rotation guidance. |
+| Migration Drift | Production uses Alembic; local uses `create_all` only for scaffolding. |
+| Event loop starvation | All DB-bound routes moved to threadpool (`def`). |
+
+---
+
+## Operational Notes
+
+- **Backups**: Dokku's PostgreSQL plugin supports `dokku postgres:export`. It is recommended to set up a cron job to backup the database to the Proxmox host or external storage.
+- **Secret Rotation**: Rotate `FERNET_KEY` and `SESSION_SECRET` if the environment is compromised.
