@@ -27,6 +27,7 @@ dependencies = [
 [project.scripts]
 sauspiel-scraper = "sauspiel_scraper.main:app"
 sauspiel-web = "sauspiel_scraper.app.main:run_app"
+sauspiel-keygen = "sauspiel_scraper.app.keygen:generate_key"
 
 [tool.ruff]
 line-length = 100
