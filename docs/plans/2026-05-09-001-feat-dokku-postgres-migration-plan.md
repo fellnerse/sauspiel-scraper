@@ -1,7 +1,7 @@
 ---
 title: Dokku Deployment & PostgreSQL Migration
 type: feat
-status: active
+status: completed
 date: 2026-05-09
 origin: docs/brainstorms/2026-05-09-dokku-postgres-migration-requirements.md
 deepened: 2026-05-09

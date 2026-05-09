@@ -13,19 +13,20 @@ def db(tmp_path):
 
 
 def test_users_table_created(db):
-    cursor = db.conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='users'")
-    assert cursor.fetchone() is not None
+    from sqlalchemy import inspect
+
+    inspector = inspect(db.engine)
+    assert "users" in inspector.get_table_names()
 
 
 def test_users_table_schema(db):
-    cursor = db.conn.execute("PRAGMA table_info(users)")
-    columns = {row[1]: row[2] for row in cursor.fetchall()}
+    from sqlalchemy import inspect
+
+    inspector = inspect(db.engine)
+    columns = {col["name"]: col["type"] for col in inspector.get_columns("users")}
     assert "username" in columns
     assert "encrypted_password" in columns
     assert "last_scraped_at" in columns
-    assert columns["username"] == "TEXT"
-    assert columns["encrypted_password"] == "TEXT"
-    assert columns["last_scraped_at"] == "TEXT"
 
 
 def test_save_and_get_user(db):

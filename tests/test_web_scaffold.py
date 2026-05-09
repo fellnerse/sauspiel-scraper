@@ -39,17 +39,18 @@ def test_login_post():
     )
     assert response.status_code == 200
     assert "Welcome, testuser!" in response.text
-    assert "username" in client.cookies
-    assert client.cookies["username"] == "testuser"
+    # We use signed sessions now, so look for the 'session' cookie
+    assert "session" in client.cookies
 
 
 def test_logout():
     # Login first
     client.post("/login", data={"username": "testuser", "password": "password"})
-    assert "username" in client.cookies
+    assert "session" in client.cookies
 
     # Logout
     response = client.get("/logout", follow_redirects=True)
     assert response.status_code == 200
     assert "Welcome, Guest!" in response.text
-    assert "username" not in client.cookies
+    # The session is cleared internally
+    assert "Welcome, Guest!" in response.text

@@ -6,8 +6,9 @@ readme = "README.md"
 authors = [
     { name = "Sebastian Fellner", email = "hey@sebastianfellner.de" }
 ]
-requires-python = ">=3.14"
+requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.14.1",
     "apscheduler>=3.11.0",
     "beautifulsoup4>=4.14.3",
     "cryptography>=44.0.2",
@@ -16,10 +17,12 @@ dependencies = [
     "jinja2>=3.1.6",
     "pandas>=3.0.2",
     "plotly>=6.7.0",
+    "psycopg[binary]>=3.2.5",
     "pydantic>=2.13.3",
     "python-dotenv>=1.2.2",
     "python-multipart>=0.0.20",
     "requests>=2.33.1",
+    "sqlalchemy>=2.0.38",
     "typer>=0.24.1",
     "uvicorn>=0.34.0",
 ]
@@ -31,10 +34,11 @@ sauspiel-keygen = "sauspiel_scraper.app.keygen:generate_key"
 
 [tool.ruff]
 line-length = 100
-target-version = "py314"
+target-version = "py312"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "N", "UP", "B"]
+ignore = ["B008"]
 
 [build-system]
 requires = ["uv_build>=0.10.8,<0.11.0"]

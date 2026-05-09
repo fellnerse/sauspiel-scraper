@@ -21,8 +21,11 @@ output/
 !tests/fixtures/*.html
 !src/**/templates/*.html
 *.json
+!app.json
 .worktrees
 .serena
 
 # Superpowers Brainstorming
 .superpowers/
+
+.direnv

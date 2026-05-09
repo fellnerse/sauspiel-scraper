@@ -1,3 +1,5 @@
+import os
+from collections.abc import Generator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -5,9 +7,11 @@ from pathlib import Path
 import dotenv
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI, Form, Request
+from fastapi import Depends, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from sqlalchemy.orm import Session
+from starlette.middleware.sessions import SessionMiddleware
 
 from sauspiel_scraper.app.analytics import process_game_data, render_analytics
 from sauspiel_scraper.app.auth import decrypt_password, encrypt_password
@@ -26,6 +30,14 @@ active_scrapes = {}
 dotenv.load_dotenv()
 
 
+def get_db() -> Generator[Session, None, None]:
+    """
+    FastAPI dependency that provides a SQLAlchemy session.
+    """
+    with db.Session() as session:
+        yield session
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
@@ -40,58 +52,63 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Sauspiel Scraper", lifespan=lifespan)
+# Add session middleware for signed cookies
+app.add_middleware(
+    SessionMiddleware, secret_key=os.environ.get("SESSION_SECRET", "local-dev-secret-change-me")
+)
 
 
 def scrape_all_users(username: str | None = None):
     """
     Background task to scrape games for one or all users.
     """
-    usernames = [username] if username else db.get_all_users()
+    with db.session_scope() as session:
+        usernames = [username] if username else db.get_all_users(session=session)
 
-    for uname in usernames:
-        user_data = db.get_user(uname)
-        if not user_data or not user_data.get("encrypted_password"):
-            continue
+        for uname in usernames:
+            user_data = db.get_user(uname, session=session)
+            if not user_data or not user_data.get("encrypted_password"):
+                continue
 
-        try:
-            password = decrypt_password(user_data["encrypted_password"])
-            scraper = SauspielScraper(uname, password, rate_limiter=global_rate_limiter)
+            try:
+                password = decrypt_password(user_data["encrypted_password"])
+                scraper = SauspielScraper(uname, password, rate_limiter=global_rate_limiter)
 
-            if scraper.login():
-                # Fetch new game previews for the current month only
-                first_of_month = datetime.now().replace(
-                    day=1, hour=0, minute=0, second=0, microsecond=0
-                )
-                new_games = scraper.get_game_list_paginated(
-                    max_new=100, since=first_of_month, db=db
-                )
+                if scraper.login():
+                    # Fetch new game previews for the current month only
+                    first_of_month = datetime.now().replace(
+                        day=1, hour=0, minute=0, second=0, microsecond=0
+                    )
+                    new_games = scraper.get_game_list_paginated(
+                        max_new=100, since=first_of_month, db=db
+                    )
 
-                count = 0
-                for info in new_games:
-                    try:
-                        data = scraper.scrape_game(info.game_id, info)
-                        if data:
-                            db.save_game(data)
-                            count += 1
-                    except Exception as e:
-                        print(f"Error scraping game {info.game_id} for {uname}: {e}")
+                    count = 0
+                    for info in new_games:
+                        try:
+                            data = scraper.scrape_game(info.game_id, info)
+                            if data:
+                                db.save_game(data, session=session)
+                                count += 1
+                        except Exception as e:
+                            print(f"Error scraping game {info.game_id} for {uname}: {e}")
 
-                db.update_last_scraped(uname, datetime.now().isoformat())
-                print(f"Successfully scraped {count} new games for {uname}")
-            else:
-                print(f"Login failed for {uname} during background scrape")
-        except Exception as e:
-            print(f"Error in background scrape for {uname}: {e}")
+                    db.update_last_scraped(uname, datetime.now().isoformat(), session=session)
+                    print(f"Successfully scraped {count} new games for {uname}")
+                else:
+                    print(f"Login failed for {uname} during background scrape")
+            except Exception as e:
+                print(f"Error in background scrape for {uname}: {e}")
 
 
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    username = request.cookies.get("username")
+def dashboard(request: Request, session: Session = Depends(get_db)):
+    username = request.session.get("username")
 
     games = []
     charts = {}
     if username:
-        raw_games = db.get_all_games(username=username)
+        raw_games = db.get_all_games(username=username, session=session)
         processed_games = process_game_data(raw_games, username)
         games = processed_games
         charts = render_analytics(processed_games)
@@ -104,21 +121,26 @@ async def dashboard(request: Request):
 
 
 @app.get("/login", response_class=HTMLResponse)
-async def login_page(request: Request):
+def login_page(request: Request):
     return templates.TemplateResponse(request=request, name="login.html", context={"user": None})
 
 
 @app.post("/login")
-async def login(request: Request, username: str = Form(...), password: str = Form(...)):
+def login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    session: Session = Depends(get_db),
+):
     scraper = SauspielScraper(username, password, rate_limiter=global_rate_limiter)
     if scraper.login():
         # Success: encrypt password and save user
         enc_pass = encrypt_password(password)
-        db.save_user(username, enc_pass)
+        db.save_user(username, enc_pass, session=session)
 
-        response = RedirectResponse(url="/", status_code=303)
-        response.set_cookie(key="username", value=username)
-        return response
+        # Store in signed session instead of raw cookie
+        request.session["username"] = username
+        return RedirectResponse(url="/", status_code=303)
     else:
         # Failure: back to login with error
         return templates.TemplateResponse(
@@ -129,15 +151,14 @@ async def login(request: Request, username: str = Form(...), password: str = For
 
 
 @app.get("/logout")
-async def logout():
-    response = RedirectResponse(url="/", status_code=303)
-    response.delete_cookie("username")
-    return response
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/", status_code=303)
 
 
 @app.post("/scrape")
-async def trigger_scrape(request: Request):
-    username = request.cookies.get("username")
+def trigger_scrape(request: Request):
+    username = request.session.get("username")
     if not username:
         return HTMLResponse("Not logged in", status_code=401)
 
@@ -162,8 +183,8 @@ async def trigger_scrape(request: Request):
 
 
 @app.get("/scrape/status")
-async def scrape_status(request: Request):
-    username = request.cookies.get("username")
+def scrape_status(request: Request):
+    username = request.session.get("username")
     job_id = f"manual_{username}"
 
     if job_id in active_scrapes:
@@ -184,7 +205,8 @@ def run_app() -> None:
     """
     Entry point for the FastAPI application.
     """
-    uvicorn.run("sauspiel_scraper.app.main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("sauspiel_scraper.app.main:app", host="0.0.0.0", port=port, reload=True)
 
 
 if __name__ == "__main__":

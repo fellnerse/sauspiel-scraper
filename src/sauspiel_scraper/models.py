@@ -28,7 +28,7 @@ class GameMeta(BaseModel):
             return 0
         try:
             return int(re.sub(r"[^\d-]", "", self.wert))
-        except ValueError, TypeError:
+        except (ValueError, TypeError):
             return 0
 
     @property
@@ -43,7 +43,7 @@ class GameMeta(BaseModel):
             return 0
         try:
             return int(re.sub(r"[^\d]", "", self.laufende))
-        except ValueError, TypeError:
+        except (ValueError, TypeError):
             return 0
 
 

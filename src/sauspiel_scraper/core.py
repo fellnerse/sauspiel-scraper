@@ -201,7 +201,7 @@ class SauspielScraper:
             json.dump(self.get_session_data(), f)
 
     @classmethod
-    def from_session_file(cls, file_path: Path) -> SauspielScraper | None:
+    def from_session_file(cls, file_path: Path) -> "SauspielScraper | None":
         if not file_path.exists():
             return None
         try:

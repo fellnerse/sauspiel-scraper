@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from sauspiel_scraper.models import Game, GameMeta
-from sauspiel_scraper.repository import Database
+from sauspiel_scraper.repository import Database, GameModel
 
 
 def test_database_save_and_get(tmp_path):
@@ -23,20 +23,23 @@ def test_database_get_all_games_ignores_invalid(tmp_path):
     db = Database(db_path)
 
     # Insert invalid data directly
-    db.conn.execute(
-        "INSERT INTO games (game_id, date, game_type, data) VALUES (?, ?, ?, ?)",
-        (
-            "invalid1",
-            "2024-01-01",
-            "",
-            '{"error": "Not found", "meta": {"date": "2024-01-01T12:00:00"}}',
-        ),
-    )
-    db.conn.execute(
-        "INSERT INTO games (game_id, date, game_type, data) VALUES (?, ?, ?, ?)",
-        ("invalid2", "2024-01-01", "", '{"garbage": "data"}'),
-    )
-    db.conn.commit()
+    with db.session_scope() as session:
+        session.add_all(
+            [
+                GameModel(
+                    game_id="invalid1",
+                    date=datetime(2024, 1, 1),
+                    game_type="",
+                    data={"error": "Not found", "meta": {"date": "2024-01-01T12:00:00"}},
+                ),
+                GameModel(
+                    game_id="invalid2",
+                    date=datetime(2024, 1, 1),
+                    game_type="",
+                    data={"garbage": "data"},
+                ),
+            ]
+        )
 
     # Should skip invalid records and return empty list
     games = db.get_all_games()
