@@ -1,5 +1,5 @@
 {
   "scripts": {
-    "release": "alembic upgrade head"
+    "release": "python -m alembic upgrade head"
   }
 }
