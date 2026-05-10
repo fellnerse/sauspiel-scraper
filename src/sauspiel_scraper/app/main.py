@@ -63,14 +63,22 @@ def scrape_all_users(username: str | None = None):
     """
     Background task to scrape games for one or all users.
     """
+    logger.info(f"Starting background scrape task (requested user: {username})")
     with db.session_scope() as session:
         usernames = [username] if username else db.get_all_users(session=session)
+        logger.info(f"Users to scrape: {usernames}")
 
         for uname in usernames:
             user_data = db.get_user(uname, session=session)
-            if not user_data or not user_data.get("encrypted_password"):
+            if not user_data:
+                logger.warning(f"User {uname} not found in database")
                 continue
 
+            if not user_data.get("encrypted_password"):
+                logger.warning(f"No encrypted password found for user {uname}")
+                continue
+
+            logger.info(f"Attempting to scrape games for {uname}")
             try:
                 password = decrypt_password(user_data["encrypted_password"])
                 scraper = SauspielScraper(uname, password, rate_limiter=global_rate_limiter)
