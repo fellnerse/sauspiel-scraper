@@ -219,7 +219,11 @@ class SauspielScraper:
         return None
 
     def get_game_list_paginated(
-        self, max_new: int = 20, since: datetime | None = None, db: GameRepository | None = None
+        self,
+        max_new: int = 20,
+        since: datetime | None = None,
+        db: GameRepository | None = None,
+        search_params: dict[str, str] | None = None,
     ) -> list[GamePreview]:
         all_found: list[GamePreview] = []
         new_count = 0
@@ -241,6 +245,12 @@ class SauspielScraper:
                 "game[result]": "-1",
                 "page": page,
             }
+            if search_params:
+                params.update(search_params)
+
+            # Ensure page is always correctly set for the loop
+            params["page"] = page
+
             if self.user_id:
                 params["player_id"] = self.user_id
 

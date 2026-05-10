@@ -59,7 +59,7 @@ app.add_middleware(
 )
 
 
-def scrape_all_users(username: str | None = None):
+def scrape_all_users(username: str | None = None, search_params: dict | None = None):
     """
     Background task to scrape games for one or all users.
     """
@@ -93,7 +93,7 @@ def scrape_all_users(username: str | None = None):
                         day=1, hour=0, minute=0, second=0, microsecond=0
                     )
                     new_games = scraper.get_game_list_paginated(
-                        max_new=100, since=first_of_month, db=db
+                        max_new=100, since=first_of_month, db=db, search_params=search_params
                     )
                     count = 0
                     for info in new_games:
@@ -184,23 +184,26 @@ def logout(request: Request):
 
 
 @app.post("/scrape")
-def trigger_scrape(request: Request):
+async def trigger_scrape(request: Request):
     username = request.session.get("username")
     if not username:
         return HTMLResponse("Not logged in", status_code=401)
+
+    form_data = await request.form()
+    search_params = {k: v for k, v in form_data.items() if v}
 
     job_id = f"manual_{username}"
     if job_id in active_scrapes:
         return HTMLResponse("<span>Scrape already in progress...</span>")
 
-    def scrape_wrapper(uname):
+    def scrape_wrapper(uname, params):
         try:
-            scrape_all_users(uname)
+            scrape_all_users(uname, search_params=params)
         finally:
             active_scrapes.pop(f"manual_{uname}", None)
 
     active_scrapes[job_id] = datetime.now()
-    scheduler.add_job(scrape_wrapper, args=[username], id=job_id)
+    scheduler.add_job(scrape_wrapper, args=[username, search_params], id=job_id)
 
     return HTMLResponse("""
         <div hx-get="/scrape/status" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML">

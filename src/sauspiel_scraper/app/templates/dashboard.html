@@ -14,20 +14,41 @@ endblock %} {% block content %}
         </p>
     </article>
     {% else %}
-    <div class="grid">
-        <div>
-            <button
-                hx-post="/scrape"
-                hx-target="#scrape-status"
-                hx-swap="outerHTML"
-            >
-                Sync New Games
-            </button>
-        </div>
-        <div id="scrape-status">
+    <article>
+        <header>Scrape Settings</header>
+        <form hx-post="/scrape" hx-target="#scrape-status" hx-swap="outerHTML">
+            <div class="grid">
+                <div>
+                    <label for="balance_type">Game Type</label>
+                    <select id="balance_type" name="game[balance_type]">
+                        <option value="-1">Alle</option>
+                        <option value="1">Echtgeld</option>
+                        <option value="0">Spielgeld</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="role">Role</label>
+                    <select id="role" name="role">
+                        <option value="all">Alle</option>
+                        <option value="mitspieler">Mitspieler</option>
+                        <option value="gegner">Gegner</option>
+                    </select>
+                </div>
+                <div>
+                    <label for="won">Result</label>
+                    <select id="won" name="game[won]">
+                        <option value="-1">Alle</option>
+                        <option value="1">Gewonnen</option>
+                        <option value="0">Verloren</option>
+                    </select>
+                </div>
+            </div>
+            <button type="submit">Sync New Games</button>
+        </form>
+        <div id="scrape-status" style="margin-top: 1rem">
             <!-- HTMX will replace this -->
         </div>
-    </div>
+    </article>
 
     {% if games %}
     <div class="grid">
