@@ -128,17 +128,26 @@ def dashboard(request: Request, session: Session = Depends(get_db)):
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
-        context={"user": username, "games": games, "charts": charts},
+        context={
+            "user": username,
+            "games": games,
+            "charts": charts,
+            "version": os.environ.get("COMMIT_SHA", "dev"),
+        },
     )
 
 
 @app.get("/login", response_class=HTMLResponse)
-def login_page(request: Request):
-    return templates.TemplateResponse(request=request, name="login.html", context={"user": None})
+async def login_page(request: Request):
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={"user": None, "version": os.environ.get("COMMIT_SHA", "dev")},
+    )
 
 
 @app.post("/login")
-def login(
+async def login(
     request: Request,
     username: str = Form(...),
     password: str = Form(...),
@@ -160,7 +169,11 @@ def login(
         return templates.TemplateResponse(
             request=request,
             name="login.html",
-            context={"user": None, "error": "Login failed. Please check your credentials."},
+            context={
+                "user": None,
+                "error": "Login failed. Please check your credentials.",
+                "version": os.environ.get("COMMIT_SHA", "dev"),
+            },
         )
 
 

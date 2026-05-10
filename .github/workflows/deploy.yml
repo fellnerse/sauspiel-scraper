@@ -4,6 +4,10 @@ on:
   push:
     # branches: [main]
 
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   deploy:
     environment: dokku
@@ -12,6 +16,10 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Get Short SHA
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
 
       - name: Connect to Tailscale
         uses: tailscale/github-action@v3
@@ -47,7 +55,8 @@ jobs:
         run: |
           ssh dokku@${{ steps.resolve.outputs.ip }} config:set --no-restart sauspiel-scraper \
             FERNET_KEY=${{ secrets.FERNET_KEY }} \
-            SESSION_SECRET=${{ secrets.SESSION_SECRET }}
+            SESSION_SECRET=${{ secrets.SESSION_SECRET }} \
+            COMMIT_SHA=${{ steps.vars.outputs.sha_short }}
 
         # We also need to provide the host key if we use the IP, or let it scan
         # The action usually does ssh-keyscan.
