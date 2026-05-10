@@ -63,15 +63,19 @@ def scrape_all_users(username: str | None = None):
     """
     Background task to scrape games for one or all users.
     """
-    logger.info(f"Starting background scrape task (requested user: {username})")
+    logger.info(f"Starting background scrape task. requested_user={repr(username)}")
     with db.session_scope() as session:
-        usernames = [username] if username else db.get_all_users(session=session)
-        logger.info(f"Users to scrape: {usernames}")
+        all_db_users = db.get_all_users(session=session)
+        logger.info(f"Current users in database: {all_db_users}")
+
+        usernames = [username] if username else all_db_users
+        logger.info(f"Processing scrape for: {usernames}")
 
         for uname in usernames:
+            logger.info(f"Lookup in DB for user: {repr(uname)}")
             user_data = db.get_user(uname, session=session)
             if not user_data:
-                logger.warning(f"User {uname} not found in database")
+                logger.warning(f"User {repr(uname)} not found in database!")
                 continue
 
             if not user_data.get("encrypted_password"):
