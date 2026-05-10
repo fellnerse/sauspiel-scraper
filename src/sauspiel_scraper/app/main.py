@@ -59,11 +59,22 @@ app.add_middleware(
 )
 
 
-def scrape_all_users(username: str | None = None, search_params: dict | None = None):
+def scrape_all_users(
+    username: str | None = None, search_params: dict | None = None, job_id: str | None = None
+):
     """
     Background task to scrape games for one or all users.
     """
     logger.info(f"Starting background scrape task. requested_user={repr(username)}")
+
+    if job_id and job_id in active_scrapes:
+        active_scrapes[job_id] = {
+            "start_time": datetime.now(),
+            "status": "Finding games...",
+            "progress": 0,
+            "total": 0,
+        }
+
     with db.session_scope() as session:
         all_db_users = db.get_all_users(session=session)
         logger.info(f"Current users in database: {all_db_users}")
@@ -95,17 +106,29 @@ def scrape_all_users(username: str | None = None, search_params: dict | None = N
                     new_games = scraper.get_game_list_paginated(
                         max_new=100, since=first_of_month, db=db, search_params=search_params
                     )
+
+                    total_games = len(new_games)
+                    if job_id and job_id in active_scrapes:
+                        active_scrapes[job_id]["total"] = total_games
+                        active_scrapes[job_id]["status"] = "Scraping games..."
+
                     count = 0
                     for info in new_games:
                         try:
                             data = scraper.scrape_game(info.game_id, info)
                             if data:
                                 db.save_game(data, session=session)
+                                session.commit()  # Commit immediately for real-time updates
                                 count += 1
+
+                                if job_id and job_id in active_scrapes:
+                                    active_scrapes[job_id]["progress"] = count
+
                         except Exception as e:
                             logger.error(f"Error scraping game {info.game_id} for {uname}: {e}")
 
                     db.update_last_scraped(uname, datetime.now().isoformat(), session=session)
+                    session.commit()
                     logger.info(f"Successfully scraped {count} new games for {uname}")
                 else:
                     logger.error(f"Login failed for {uname} during background scrape")
@@ -198,15 +221,20 @@ async def trigger_scrape(request: Request):
 
     def scrape_wrapper(uname, params):
         try:
-            scrape_all_users(uname, search_params=params)
+            scrape_all_users(uname, search_params=params, job_id=job_id)
         finally:
-            active_scrapes.pop(f"manual_{uname}", None)
+            active_scrapes.pop(job_id, None)
 
-    active_scrapes[job_id] = datetime.now()
+    active_scrapes[job_id] = {
+        "start_time": datetime.now(),
+        "status": "Starting...",
+        "progress": 0,
+        "total": 0,
+    }
     scheduler.add_job(scrape_wrapper, args=[username, search_params], id=job_id)
 
     return HTMLResponse("""
-        <div hx-get="/scrape/status" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML">
+        <div hx-get="/scrape/status" hx-trigger="every 1s" hx-target="this" hx-swap="outerHTML">
             🚀 Scrape triggered...
         </div>
     """)
@@ -218,9 +246,23 @@ def scrape_status(request: Request):
     job_id = f"manual_{username}"
 
     if job_id in active_scrapes:
+        state = active_scrapes[job_id]
+        start_time = state["start_time"].strftime("%H:%M:%S")
+        status = state["status"]
+        progress = state["progress"]
+        total = state["total"]
+
+        progress_html = (
+            f'<progress value="{progress}" max="{total}"></progress>'
+            if total > 0
+            else "<progress></progress>"
+        )
+
         return HTMLResponse(f"""
-            <div hx-get="/scrape/status" hx-trigger="every 5s" hx-target="this" hx-swap="outerHTML">
-                ⏳ Scraping in progress (started {active_scrapes[job_id].strftime("%H:%M:%S")})...
+            <div hx-get="/scrape/status" hx-trigger="every 1s" hx-target="this" hx-swap="outerHTML">
+                <small>⏳ {status} (started {start_time})</small>
+                {progress_html}
+                <small>{progress} / {total}</small>
             </div>
         """)
     else:
