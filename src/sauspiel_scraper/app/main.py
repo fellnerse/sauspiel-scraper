@@ -1,3 +1,4 @@
+import logging
 import os
 from collections.abc import Generator
 from contextlib import asynccontextmanager
@@ -18,6 +19,13 @@ from sauspiel_scraper.app.auth import decrypt_password, encrypt_password
 from sauspiel_scraper.core import SauspielScraper
 from sauspiel_scraper.rate_limiter import RateLimiter
 from sauspiel_scraper.repository import Database
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
+)
+logger = logging.getLogger(__name__)
 
 # Setup
 BASE_DIR = Path(__file__).resolve().parent
@@ -44,11 +52,11 @@ async def lifespan(app: FastAPI):
     scheduler.start()
     # Schedule the task to run every 6 hours
     scheduler.add_job(scrape_all_users, "interval", hours=6, id="scrape_all")
-    print("Scheduler started and job added.")
+    logger.info("Scheduler started and job added.")
     yield
     # Shutdown
     scheduler.shutdown()
-    print("Scheduler shut down.")
+    logger.info("Scheduler shut down.")
 
 
 app = FastAPI(title="Sauspiel Scraper", lifespan=lifespan)
@@ -100,14 +108,14 @@ def scrape_all_users(username: str | None = None):
                                 db.save_game(data, session=session)
                                 count += 1
                         except Exception as e:
-                            print(f"Error scraping game {info.game_id} for {uname}: {e}")
+                            logger.error(f"Error scraping game {info.game_id} for {uname}: {e}")
 
                     db.update_last_scraped(uname, datetime.now().isoformat(), session=session)
-                    print(f"Successfully scraped {count} new games for {uname}")
+                    logger.info(f"Successfully scraped {count} new games for {uname}")
                 else:
-                    print(f"Login failed for {uname} during background scrape")
+                    logger.error(f"Login failed for {uname} during background scrape")
             except Exception as e:
-                print(f"Error in background scrape for {uname}: {e}")
+                logger.exception(f"Error in background scrape for {uname}: {e}")
 
 
 @app.get("/", response_class=HTMLResponse)

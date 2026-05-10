@@ -1,4 +1,5 @@
 import json
+import logging
 import re
 import threading
 import time
@@ -11,6 +12,8 @@ from bs4 import BeautifulSoup, Tag
 
 from sauspiel_scraper.models import Game, GameMeta, GamePreview, Trick
 from sauspiel_scraper.rate_limiter import RateLimiter
+
+logger = logging.getLogger(__name__)
 
 CARD_MAP = {
     "Eichel-Sau": "E-A",
@@ -111,12 +114,13 @@ class SauspielScraper:
             self.rate_limiter.acquire()
             resp = self.session.get(self.BASE_URL)
             if resp.status_code == 429:
-                print("DEBUG: Rate limited during login check (429)")
+                logger.warning("Rate limited during login check (429)")
                 self.rate_limiter.report_429()
                 return False
 
             if "Ausloggen" in resp.text:
                 self._identify_user_id(resp.text)
+                logger.info(f"Already logged in as {self.username} (user_id={self.user_id})")
                 return True
 
             soup = BeautifulSoup(resp.text, "html.parser")
@@ -151,9 +155,10 @@ class SauspielScraper:
             success = "Ausloggen" in resp.text
             if success:
                 self._identify_user_id(resp.text)
+                logger.info(f"Successfully logged in as {self.username} (user_id={self.user_id})")
             else:
-                print(
-                    f"DEBUG: Login failed with status {resp.status_code}. "
+                logger.error(
+                    f"Login failed for {self.username} with status {resp.status_code}. "
                     f"Content length: {len(resp.text)}"
                 )
 
@@ -241,7 +246,7 @@ class SauspielScraper:
             if self.user_id:
                 params["player_id"] = self.user_id
 
-            print(f"DEBUG: Fetching page {page} with role=all and player_id={self.user_id}...")
+            logger.debug(f"Fetching page {page} with role=all and player_id={self.user_id}...")
             # Use same-origin AJAX request style
             headers = {
                 "Accept": "text/plain, */*; q=0.01",
@@ -252,23 +257,24 @@ class SauspielScraper:
             resp = self.session.get(f"{self.BASE_URL}/spiele", params=params, headers=headers)
 
             if resp.status_code == 200:
-                pass
+                logger.debug(f"Response 200 OK. Content length: {len(resp.text)}")
             elif resp.status_code == 429:
                 retry_after = resp.headers.get("Retry-After")
+                logger.warning(f"Rate limited (429). Retry after: {retry_after}")
                 self.rate_limiter.report_429(int(retry_after) if retry_after else None)
                 continue
             else:
-                # Other error
-                pass
+                logger.error(f"Failed to fetch games list: Status {resp.status_code}")
+                break
 
             soup = BeautifulSoup(resp.text, "html.parser")
             items = soup.find_all("div", class_="games-item")
 
             if not items:
-                print(f"DEBUG: No games-item found on page {page}.")
+                logger.info(f"No games-item found on page {page}.")
                 break
 
-            print(f"DEBUG: Found {len(items)} items on page {page}.")
+            logger.info(f"Found {len(items)} items on page {page}.")
             for item in items:
                 game_meta: dict[str, Any] = {}
                 subtext = item.find("p", class_="card-title-subtext")
@@ -278,7 +284,7 @@ class SauspielScraper:
                     if date_match:
                         game_date = datetime.strptime(date_match.group(1), "%d.%m.%Y %H:%M")
                         if since and game_date < since:
-                            print(f"DEBUG: Reached date threshold {since}")
+                            logger.info(f"Reached date threshold {since}")
                             return all_found
                         game_meta["date"] = game_date
 
@@ -304,17 +310,17 @@ class SauspielScraper:
                             if "date" not in game_meta:
                                 raise ValueError(f"Could not parse date for game {gid}")
                             all_found.append(GamePreview(**game_meta))
-                            print(f"DEBUG: New game found: {gid}")
+                            logger.debug(f"New game found: {gid}")
                         else:
-                            print(f"DEBUG: Game {gid} already in DB.")
+                            logger.debug(f"Game {gid} already in DB.")
 
                         if new_count >= max_new and not since:
-                            print(f"DEBUG: Reached max_new limit {max_new}")
+                            logger.info(f"Reached max_new limit {max_new}")
                             return all_found
 
             # If we have 20 items, there is likely a next page (blind pagination)
             if len(items) < 20:
-                print(f"DEBUG: Fewer than 20 items ({len(items)}) on page {page}, stopping.")
+                logger.info(f"Fewer than 20 items ({len(items)}) on page {page}, stopping.")
                 break
 
             page += 1

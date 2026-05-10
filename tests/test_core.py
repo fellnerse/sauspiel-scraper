@@ -12,6 +12,7 @@ def test_get_game_list_paginated_params():
     # Mock response with no games to stop the loop
     mock_resp = MagicMock()
     mock_resp.text = "<html><body></body></html>"
+    mock_resp.status_code = 200
     scraper.session.get.return_value = mock_resp
 
     scraper.get_game_list_paginated(max_new=5)
@@ -41,10 +42,12 @@ def test_get_game_list_paginated_finds_new_games():
     """
     mock_resp_page1 = MagicMock()
     mock_resp_page1.text = html
+    mock_resp_page1.status_code = 200
 
     # Response for "next page" check - we'll just say no next page link
     mock_resp_empty = MagicMock()
     mock_resp_empty.text = "<html><body></body></html>"
+    mock_resp_empty.status_code = 200
 
     # We need to return the page1 then stop
     scraper.session.get.side_effect = [mock_resp_page1, mock_resp_empty]
@@ -72,9 +75,12 @@ def test_get_game_list_paginated_skips_existing():
     """
     mock_resp = MagicMock()
     mock_resp.text = html
+    mock_resp.status_code = 200
 
     # Stop after one page
-    scraper.session.get.side_effect = [mock_resp, MagicMock(text="")]
+    mock_empty = MagicMock(text="")
+    mock_empty.status_code = 200
+    scraper.session.get.side_effect = [mock_resp, mock_empty]
 
     db = MagicMock(spec=Database)
     db.game_exists.return_value = True  # Simulate already exists
@@ -106,7 +112,9 @@ def test_get_game_list_paginated_multiple_pages():
     )
 
     mock_resp1 = MagicMock(text=html1)
+    mock_resp1.status_code = 200
     mock_resp2 = MagicMock(text=html2)
+    mock_resp2.status_code = 200
 
     scraper.session.get.side_effect = [mock_resp1, mock_resp2]
 
@@ -133,6 +141,7 @@ def test_get_game_list_paginated_no_userid_needed():
     mock_resp = MagicMock(
         text='<div class="games-item"><h4 class="card-title"><a href="/spiele/123"></a></h4><p class="card-title-subtext">20.03.2024 12:00 — Eichel</p></div>'  # noqa: E501
     )
+    mock_resp.status_code = 200
     scraper.session.get.return_value = mock_resp
 
     new_games = scraper.get_game_list_paginated(max_new=1)
