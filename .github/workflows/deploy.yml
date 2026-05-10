@@ -55,18 +55,18 @@ jobs:
           ssh-keyscan -H $IP >> ~/.ssh/known_hosts
           echo "Resolved ${{ secrets.DOKKU_HOST }} to $IP"
 
-      - name: Push to Dokku
-        uses: dokku/github-action@master
-        with:
-          git_remote_url: "ssh://dokku@${{ steps.resolve.outputs.ip }}:22/${{ steps.target.outputs.app }}"
-          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
-
       - name: Sync App Secrets to Dokku
         run: |
           ssh dokku@${{ steps.resolve.outputs.ip }} config:set --no-restart ${{ steps.target.outputs.app }} \
             FERNET_KEY=${{ secrets.FERNET_KEY }} \
             SESSION_SECRET=${{ secrets.SESSION_SECRET }} \
             COMMIT_SHA=${{ steps.vars.outputs.sha_short }}
+
+      - name: Push to Dokku
+        uses: dokku/github-action@master
+        with:
+          git_remote_url: "ssh://dokku@${{ steps.resolve.outputs.ip }}:22/${{ steps.target.outputs.app }}"
+          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
 
         # We also need to provide the host key if we use the IP, or let it scan
         # The action usually does ssh-keyscan.
