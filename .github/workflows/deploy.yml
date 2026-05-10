@@ -2,10 +2,10 @@ name: Deploy to Dokku
 
 on:
   push:
-    # branches: [main]
+    branches: ["**"]
 
 concurrency:
-  group: deploy-${{ github.ref }}
+  group: deploy-${{ github.ref_name }}
   cancel-in-progress: false
 
 jobs:
@@ -16,6 +16,16 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
+      - name: Set target app
+        id: target
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "app=sauspiel-scraper" >> $GITHUB_OUTPUT
+          else
+            echo "app=sauspiel-scraper-dev" >> $GITHUB_OUTPUT
+          fi
+          echo "Deploying branch ${{ github.ref_name }} to app"
 
       - name: Get Short SHA
         id: vars
@@ -48,12 +58,12 @@ jobs:
       - name: Push to Dokku
         uses: dokku/github-action@master
         with:
-          git_remote_url: "ssh://dokku@${{ steps.resolve.outputs.ip }}:22/sauspiel-scraper"
+          git_remote_url: "ssh://dokku@${{ steps.resolve.outputs.ip }}:22/${{ steps.target.outputs.app }}"
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
 
       - name: Sync App Secrets to Dokku
         run: |
-          ssh dokku@${{ steps.resolve.outputs.ip }} config:set --no-restart sauspiel-scraper \
+          ssh dokku@${{ steps.resolve.outputs.ip }} config:set --no-restart ${{ steps.target.outputs.app }} \
             FERNET_KEY=${{ secrets.FERNET_KEY }} \
             SESSION_SECRET=${{ secrets.SESSION_SECRET }} \
             COMMIT_SHA=${{ steps.vars.outputs.sha_short }}
