@@ -1,4 +1,3 @@
-import logging
 import os
 from collections.abc import Generator
 from contextlib import asynccontextmanager
@@ -11,6 +10,7 @@ from apscheduler.schedulers.background import BackgroundScheduler
 from fastapi import Depends, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from loguru import logger
 from sqlalchemy.orm import Session
 from starlette.middleware.sessions import SessionMiddleware
 
@@ -19,13 +19,6 @@ from sauspiel_scraper.app.auth import decrypt_password, encrypt_password
 from sauspiel_scraper.core import SauspielScraper
 from sauspiel_scraper.rate_limiter import RateLimiter
 from sauspiel_scraper.repository import Database
-
-# Configure logging
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-)
-logger = logging.getLogger(__name__)
 
 # Setup
 BASE_DIR = Path(__file__).resolve().parent
@@ -83,23 +76,13 @@ def scrape_all_users(username: str | None = None):
                 scraper = SauspielScraper(uname, password, rate_limiter=global_rate_limiter)
 
                 if scraper.login():
-                    # If we have a last_scraped_at, only fetch games since then.
-                    # Otherwise, it's a fresh user, so fetch everything (up to 1000).
-                    since_dt = None
-                    max_new = 1000
-
-                    if user_data.get("last_scraped_at"):
-                        try:
-                            since_dt = datetime.fromisoformat(user_data["last_scraped_at"])
-                            # Add some overlap safety
-                            max_new = 200
-                        except ValueError:
-                            pass
-
-                    new_games = scraper.get_game_list_paginated(
-                        max_new=max_new, since=since_dt, db=db
+                    # Fetch new game previews for the current month only
+                    first_of_month = datetime.now().replace(
+                        day=1, hour=0, minute=0, second=0, microsecond=0
                     )
-
+                    new_games = scraper.get_game_list_paginated(
+                        max_new=100, since=first_of_month, db=db
+                    )
                     count = 0
                     for info in new_games:
                         try:

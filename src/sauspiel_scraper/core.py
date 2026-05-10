@@ -1,5 +1,4 @@
 import json
-import logging
 import re
 import threading
 import time
@@ -9,11 +8,10 @@ from typing import Any, Protocol
 
 import requests
 from bs4 import BeautifulSoup, Tag
+from loguru import logger
 
 from sauspiel_scraper.models import Game, GameMeta, GamePreview, Trick
 from sauspiel_scraper.rate_limiter import RateLimiter
-
-logger = logging.getLogger(__name__)
 
 CARD_MAP = {
     "Eichel-Sau": "E-A",
