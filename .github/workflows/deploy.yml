@@ -2,7 +2,7 @@ name: Deploy to Dokku
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
 
 jobs:
   deploy:
@@ -19,8 +19,18 @@ jobs:
           oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
           tags: tag:ci
 
+      - name: Set target app
+        id: target
+        run: |
+          if [ "${{ github.ref }}" = "refs/heads/main" ]; then
+            echo "app=sauspiel-scraper" >> $GITHUB_OUTPUT
+          else
+            echo "app=sauspiel-scraper-dev" >> $GITHUB_OUTPUT
+          fi
+
       - name: Push to Dokku
         uses: dokku/github-action@master
         with:
-          git_remote_url: 'ssh://dokku@${{ secrets.DOKKU_HOST }}:22/sauspiel-scraper'
+          # The address of your Dokku server (e.g. scraper.your-tailnet.ts.net)
+          git_remote_url: 'ssh://dokku@${{ secrets.DOKKU_HOST }}:22/${{ steps.target.outputs.app }}'
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
