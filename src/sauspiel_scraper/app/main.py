@@ -149,6 +149,8 @@ def login(
         # Success: encrypt password and save user
         enc_pass = encrypt_password(password)
         db.save_user(username, enc_pass, session=session)
+        session.commit()
+        logger.info(f"User {username} successfully authenticated and persisted to DB")
 
         # Store in signed session instead of raw cookie
         request.session["username"] = username
