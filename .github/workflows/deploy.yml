@@ -1,0 +1,73 @@
+name: Deploy to Dokku
+
+on:
+  push:
+    branches: ["**"]
+
+concurrency:
+  group: deploy-${{ github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment: dokku
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set target app
+        id: target
+        run: |
+          if [ "${{ github.ref_name }}" = "main" ]; then
+            echo "app=sauspiel-scraper" >> $GITHUB_OUTPUT
+          else
+            echo "app=sauspiel-scraper-dev" >> $GITHUB_OUTPUT
+          fi
+          echo "Deploying branch ${{ github.ref_name }} to app"
+
+      - name: Get Short SHA
+        id: vars
+        run: echo "sha_short=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Connect to Tailscale
+        uses: tailscale/github-action@v3
+        with:
+          oauth-client-id: ${{ secrets.TS_OAUTH_CLIENT_ID }}
+          oauth-secret: ${{ secrets.TS_OAUTH_SECRET }}
+          tags: tag:ci
+
+      - name: Install SSH Key
+        uses: shimataro/ssh-key-action@v2
+        with:
+          key: ${{ secrets.SSH_PRIVATE_KEY }}
+          known_hosts: "placeholder" # Will be updated by resolve step
+
+      - name: Resolve Dokku Host IP
+        id: resolve
+        run: |
+          IP=$(dig +short ${{ secrets.DOKKU_HOST }} | tail -n1)
+          if [ -z "$IP" ]; then
+            IP=$(getent hosts ${{ secrets.DOKKU_HOST }} | awk '{ print $1 }')
+          fi
+          echo "ip=$IP" >> $GITHUB_OUTPUT
+          ssh-keyscan -H $IP >> ~/.ssh/known_hosts
+          echo "Resolved ${{ secrets.DOKKU_HOST }} to $IP"
+
+      - name: Sync App Secrets to Dokku
+        run: |
+          ssh dokku@${{ steps.resolve.outputs.ip }} config:set --no-restart ${{ steps.target.outputs.app }} \
+            FERNET_KEY=${{ secrets.FERNET_KEY }} \
+            SESSION_SECRET=${{ secrets.SESSION_SECRET }} \
+            COMMIT_SHA=${{ steps.vars.outputs.sha_short }}
+
+      - name: Push to Dokku
+        uses: dokku/github-action@master
+        with:
+          git_remote_url: "ssh://dokku@${{ steps.resolve.outputs.ip }}:22/${{ steps.target.outputs.app }}"
+          ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
+
+        # We also need to provide the host key if we use the IP, or let it scan
+        # The action usually does ssh-keyscan.
+        # Since we changed the URL to use IP, ssh-keyscan will use the IP too.

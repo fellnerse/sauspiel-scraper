@@ -1,3 +1,5 @@
+import os
+from collections.abc import Generator
 from contextlib import asynccontextmanager
 from datetime import datetime
 from pathlib import Path
@@ -5,9 +7,12 @@ from pathlib import Path
 import dotenv
 import uvicorn
 from apscheduler.schedulers.background import BackgroundScheduler
-from fastapi import FastAPI, Form, Request
+from fastapi import Depends, FastAPI, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
+from loguru import logger
+from sqlalchemy.orm import Session
+from starlette.middleware.sessions import SessionMiddleware
 
 from sauspiel_scraper.app.analytics import process_game_data, render_analytics
 from sauspiel_scraper.app.auth import decrypt_password, encrypt_password
@@ -26,72 +31,119 @@ active_scrapes = {}
 dotenv.load_dotenv()
 
 
+def get_db() -> Generator[Session, None, None]:
+    """
+    FastAPI dependency that provides a SQLAlchemy session.
+    """
+    with db.Session() as session:
+        yield session
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup
     scheduler.start()
     # Schedule the task to run every 6 hours
     scheduler.add_job(scrape_all_users, "interval", hours=6, id="scrape_all")
-    print("Scheduler started and job added.")
+    logger.info("Scheduler started and job added.")
     yield
     # Shutdown
     scheduler.shutdown()
-    print("Scheduler shut down.")
+    logger.info("Scheduler shut down.")
 
 
 app = FastAPI(title="Sauspiel Scraper", lifespan=lifespan)
+# Add session middleware for signed cookies
+app.add_middleware(
+    SessionMiddleware, secret_key=os.environ.get("SESSION_SECRET", "local-dev-secret-change-me")
+)
 
 
-def scrape_all_users(username: str | None = None):
+def scrape_all_users(
+    username: str | None = None, search_params: dict | None = None, job_id: str | None = None
+):
     """
     Background task to scrape games for one or all users.
     """
-    usernames = [username] if username else db.get_all_users()
+    logger.info(f"Starting background scrape task. requested_user={repr(username)}")
 
-    for uname in usernames:
-        user_data = db.get_user(uname)
-        if not user_data or not user_data.get("encrypted_password"):
-            continue
+    if job_id and job_id in active_scrapes:
+        active_scrapes[job_id] = {
+            "start_time": datetime.now(),
+            "status": "Finding games...",
+            "progress": 0,
+            "total": 0,
+        }
 
-        try:
-            password = decrypt_password(user_data["encrypted_password"])
-            scraper = SauspielScraper(uname, password, rate_limiter=global_rate_limiter)
+    with db.session_scope() as session:
+        all_db_users = db.get_all_users(session=session)
+        logger.info(f"Current users in database: {all_db_users}")
 
-            if scraper.login():
-                # Fetch new game previews for the current month only
-                first_of_month = datetime.now().replace(
-                    day=1, hour=0, minute=0, second=0, microsecond=0
-                )
-                new_games = scraper.get_game_list_paginated(
-                    max_new=100, since=first_of_month, db=db
-                )
+        usernames = [username] if username else all_db_users
+        logger.info(f"Processing scrape for: {usernames}")
 
-                count = 0
-                for info in new_games:
-                    try:
-                        data = scraper.scrape_game(info.game_id, info)
-                        if data:
-                            db.save_game(data)
-                            count += 1
-                    except Exception as e:
-                        print(f"Error scraping game {info.game_id} for {uname}: {e}")
+        for uname in usernames:
+            logger.info(f"Lookup in DB for user: {repr(uname)}")
+            user_data = db.get_user(uname, session=session)
+            if not user_data:
+                logger.warning(f"User {repr(uname)} not found in database!")
+                continue
 
-                db.update_last_scraped(uname, datetime.now().isoformat())
-                print(f"Successfully scraped {count} new games for {uname}")
-            else:
-                print(f"Login failed for {uname} during background scrape")
-        except Exception as e:
-            print(f"Error in background scrape for {uname}: {e}")
+            if not user_data.get("encrypted_password"):
+                logger.warning(f"No encrypted password found for user {uname}")
+                continue
+
+            logger.info(f"Attempting to scrape games for {uname}")
+            try:
+                password = decrypt_password(user_data["encrypted_password"])
+                scraper = SauspielScraper(uname, password, rate_limiter=global_rate_limiter)
+
+                if scraper.login():
+                    # Fetch new game previews for the current month only
+                    first_of_month = datetime.now().replace(
+                        day=1, hour=0, minute=0, second=0, microsecond=0
+                    )
+                    new_games = scraper.get_game_list_paginated(
+                        max_new=100, since=first_of_month, db=db, search_params=search_params
+                    )
+
+                    total_games = len(new_games)
+                    if job_id and job_id in active_scrapes:
+                        active_scrapes[job_id]["total"] = total_games
+                        active_scrapes[job_id]["status"] = "Scraping games..."
+
+                    count = 0
+                    for info in new_games:
+                        try:
+                            data = scraper.scrape_game(info.game_id, info)
+                            if data:
+                                db.save_game(data, session=session)
+                                session.commit()  # Commit immediately for real-time updates
+                                count += 1
+
+                                if job_id and job_id in active_scrapes:
+                                    active_scrapes[job_id]["progress"] = count
+
+                        except Exception as e:
+                            logger.error(f"Error scraping game {info.game_id} for {uname}: {e}")
+
+                    db.update_last_scraped(uname, datetime.now().isoformat(), session=session)
+                    session.commit()
+                    logger.info(f"Successfully scraped {count} new games for {uname}")
+                else:
+                    logger.error(f"Login failed for {uname} during background scrape")
+            except Exception as e:
+                logger.exception(f"Error in background scrape for {uname}: {e}")
 
 
 @app.get("/", response_class=HTMLResponse)
-async def dashboard(request: Request):
-    username = request.cookies.get("username")
+def dashboard(request: Request, session: Session = Depends(get_db)):
+    username = request.session.get("username")
 
     games = []
     charts = {}
     if username:
-        raw_games = db.get_all_games(username=username)
+        raw_games = db.get_all_games(username=username, session=session)
         processed_games = process_game_data(raw_games, username)
         games = processed_games
         charts = render_analytics(processed_games)
@@ -99,77 +151,118 @@ async def dashboard(request: Request):
     return templates.TemplateResponse(
         request=request,
         name="dashboard.html",
-        context={"user": username, "games": games, "charts": charts},
+        context={
+            "user": username,
+            "games": games,
+            "charts": charts,
+            "version": os.environ.get("COMMIT_SHA", "dev"),
+        },
     )
 
 
 @app.get("/login", response_class=HTMLResponse)
 async def login_page(request: Request):
-    return templates.TemplateResponse(request=request, name="login.html", context={"user": None})
+    return templates.TemplateResponse(
+        request=request,
+        name="login.html",
+        context={"user": None, "version": os.environ.get("COMMIT_SHA", "dev")},
+    )
 
 
 @app.post("/login")
-async def login(request: Request, username: str = Form(...), password: str = Form(...)):
+async def login(
+    request: Request,
+    username: str = Form(...),
+    password: str = Form(...),
+    session: Session = Depends(get_db),
+):
     scraper = SauspielScraper(username, password, rate_limiter=global_rate_limiter)
     if scraper.login():
         # Success: encrypt password and save user
         enc_pass = encrypt_password(password)
-        db.save_user(username, enc_pass)
+        db.save_user(username, enc_pass, session=session)
+        session.commit()
+        logger.info(f"User {username} successfully authenticated and persisted to DB")
 
-        response = RedirectResponse(url="/", status_code=303)
-        response.set_cookie(key="username", value=username)
-        return response
+        # Store in signed session instead of raw cookie
+        request.session["username"] = username
+        return RedirectResponse(url="/", status_code=303)
     else:
         # Failure: back to login with error
         return templates.TemplateResponse(
             request=request,
             name="login.html",
-            context={"user": None, "error": "Login failed. Please check your credentials."},
+            context={
+                "user": None,
+                "error": "Login failed. Please check your credentials.",
+                "version": os.environ.get("COMMIT_SHA", "dev"),
+            },
         )
 
 
 @app.get("/logout")
-async def logout():
-    response = RedirectResponse(url="/", status_code=303)
-    response.delete_cookie("username")
-    return response
+def logout(request: Request):
+    request.session.clear()
+    return RedirectResponse(url="/", status_code=303)
 
 
 @app.post("/scrape")
 async def trigger_scrape(request: Request):
-    username = request.cookies.get("username")
+    username = request.session.get("username")
     if not username:
         return HTMLResponse("Not logged in", status_code=401)
+
+    form_data = await request.form()
+    search_params = {k: v for k, v in form_data.items() if v}
 
     job_id = f"manual_{username}"
     if job_id in active_scrapes:
         return HTMLResponse("<span>Scrape already in progress...</span>")
 
-    def scrape_wrapper(uname):
+    def scrape_wrapper(uname, params):
         try:
-            scrape_all_users(uname)
+            scrape_all_users(uname, search_params=params, job_id=job_id)
         finally:
-            active_scrapes.pop(f"manual_{uname}", None)
+            active_scrapes.pop(job_id, None)
 
-    active_scrapes[job_id] = datetime.now()
-    scheduler.add_job(scrape_wrapper, args=[username], id=job_id)
+    active_scrapes[job_id] = {
+        "start_time": datetime.now(),
+        "status": "Starting...",
+        "progress": 0,
+        "total": 0,
+    }
+    scheduler.add_job(scrape_wrapper, args=[username, search_params], id=job_id)
 
     return HTMLResponse("""
-        <div hx-get="/scrape/status" hx-trigger="every 2s" hx-target="this" hx-swap="outerHTML">
+        <div hx-get="/scrape/status" hx-trigger="every 1s" hx-target="this" hx-swap="outerHTML">
             🚀 Scrape triggered...
         </div>
     """)
 
 
 @app.get("/scrape/status")
-async def scrape_status(request: Request):
-    username = request.cookies.get("username")
+def scrape_status(request: Request):
+    username = request.session.get("username")
     job_id = f"manual_{username}"
 
     if job_id in active_scrapes:
+        state = active_scrapes[job_id]
+        start_time = state["start_time"].strftime("%H:%M:%S")
+        status = state["status"]
+        progress = state["progress"]
+        total = state["total"]
+
+        progress_html = (
+            f'<progress value="{progress}" max="{total}"></progress>'
+            if total > 0
+            else "<progress></progress>"
+        )
+
         return HTMLResponse(f"""
-            <div hx-get="/scrape/status" hx-trigger="every 5s" hx-target="this" hx-swap="outerHTML">
-                ⏳ Scraping in progress (started {active_scrapes[job_id].strftime("%H:%M:%S")})...
+            <div hx-get="/scrape/status" hx-trigger="every 1s" hx-target="this" hx-swap="outerHTML">
+                <small>⏳ {status} (started {start_time})</small>
+                {progress_html}
+                <small>{progress} / {total}</small>
             </div>
         """)
     else:
@@ -184,7 +277,8 @@ def run_app() -> None:
     """
     Entry point for the FastAPI application.
     """
-    uvicorn.run("sauspiel_scraper.app.main:app", host="0.0.0.0", port=8000, reload=True)
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run("sauspiel_scraper.app.main:app", host="0.0.0.0", port=port, reload=True)
 
 
 if __name__ == "__main__":

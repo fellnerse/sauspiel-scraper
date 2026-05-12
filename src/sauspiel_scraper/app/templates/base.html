@@ -1,41 +1,52 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>{% block title %}Sauspiel Scraper{% endblock %}</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
-    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
-    <style>
-        :root {
-            --pico-font-size: 16px;
-        }
-        .chart-container {
-            margin-bottom: 2rem;
-        }
-    </style>
-</head>
-<body>
-    <header class="container">
-        <nav>
-            <ul>
-                <li><strong>Sauspiel Scraper</strong></li>
-            </ul>
-            <ul>
-                <li><a href="/">Dashboard</a></li>
-                {% if user %}
-                    <li><a href="/logout" class="secondary">Logout ({{ user }})</a></li>
-                {% else %}
+    <head>
+        <meta charset="UTF-8" />
+        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <title>{% block title %}Sauspiel Scraper{% endblock %}</title>
+        <link
+            rel="stylesheet"
+            href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css"
+        />
+        <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+        <style>
+            :root {
+                --pico-font-size: 16px;
+            }
+            .chart-container {
+                margin-bottom: 2rem;
+            }
+        </style>
+    </head>
+    <body>
+        <header class="container">
+            <nav>
+                <ul>
+                    <li><strong>Sauspiel Scraper</strong></li>
+                </ul>
+                <ul>
+                    <li><a href="/">Dashboard</a></li>
+                    {% if user %}
+                    <li>
+                        <a href="/logout" class="secondary"
+                            >Logout ({{ user }})</a
+                        >
+                    </li>
+                    {% else %}
                     <li><a href="/login">Login</a></li>
-                {% endif %}
-            </ul>
-        </nav>
-    </header>
-    <main class="container">
-        {% block content %}{% endblock %}
-    </main>
-    <footer class="container">
-        <small>Built with FastAPI, Jinja2, and HTMX</small>
-    </footer>
-</body>
+                    {% endif %}
+                </ul>
+            </nav>
+        </header>
+        <main class="container">{% block content %}{% endblock %}</main>
+        <footer class="container">
+            <hr />
+            <div style="display: flex; justify-content: space-between">
+                <small>Built with FastAPI, Jinja2, and HTMX</small>
+                <small class="secondary"
+                    >Version: <code>{{ version }}</code></small
+                >
+            </div>
+        </footer>
+    </body>
 </html>

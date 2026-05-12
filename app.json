@@ -1,0 +1,19 @@
+{
+  "name": "sauspiel-scraper",
+  "description": "Scrape and analyze Sauspiel games",
+  "scripts": {
+    "release": "python -m alembic upgrade head"
+  },
+  "healthchecks": {
+    "web": [
+      {
+        "type": "startup",
+        "name": "check login page",
+        "path": "/login",
+        "attempts": 5,
+        "timeout": 5,
+        "wait": 5
+      }
+    ]
+  }
+}

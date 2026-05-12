@@ -19,19 +19,37 @@ PASSWORD=your_password
 
 Run the scraper:
 ```bash
-uv run sauspiel-scraper --count 10 --output output/games.jsonl
+nix develop --command uv run sauspiel-scraper --count 10
 ```
-
-Options:
-- `--count`, `-c`: Number of games to scrape.
-- `--since`, `-s`: Scrape games since date (DD.MM.YYYY).
-- `--pretty`: Save as formatted JSON array instead of JSONL.
 
 ### Web UI
 
-Launch the Streamlit app:
+The Web UI is built with FastAPI and HTMX. Launch it with:
 ```bash
-uv run sauspiel-web
+nix develop --command sauspiel-web
+```
+
+## Development
+
+This project uses a Nix flake for its development environment, which includes Python 3.14, Docker, and Colima.
+
+### 1. Start Docker environment
+On macOS, start Colima and then the PostgreSQL container:
+```bash
+nix develop --command colima start
+nix develop --command docker compose up -d
+```
+
+### 2. Database Migrations
+Initialize or upgrade the PostgreSQL database:
+```bash
+nix develop --command bash -c "export \$(grep -v '^#' .env | xargs) && uv run alembic upgrade head"
+```
+
+### 3. Migrate Local Data (Optional)
+If you have an existing `output/sauspiel.db` (SQLite), you can migrate it to PostgreSQL:
+```bash
+nix develop --command bash -c "export \$(grep -v '^#' .env | xargs) && uv run python scripts/migrate_sqlite_to_postgres.py"
 ```
 
 ## Data Format

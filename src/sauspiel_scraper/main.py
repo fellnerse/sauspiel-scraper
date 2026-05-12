@@ -46,8 +46,9 @@ def scrape(
     db_path: Annotated[Path, typer.Option("--db")] = Path("output/sauspiel.db"),
     concurrency: Annotated[int, typer.Option("--concurrency", "-j")] = 3,
 ) -> None:
-    """Scrape games and save them to a SQLite database."""
+    """Scrape games and save them to a database."""
     since_dt = datetime.strptime(since, "%d.%m.%Y") if since else None
+
     db = Database(db_path)
     scraper = SauspielScraper(username, password)
 

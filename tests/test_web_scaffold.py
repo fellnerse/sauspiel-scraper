@@ -1,18 +1,13 @@
 import pytest
-from cryptography.fernet import Fernet
 from fastapi.testclient import TestClient
 
 from sauspiel_scraper.app.main import app
 from sauspiel_scraper.core import SauspielScraper
 
-# Setup a dummy FERNET_KEY for tests
-TEST_KEY = Fernet.generate_key().decode()
-
 
 @pytest.fixture(autouse=True)
-def mock_fernet_key(monkeypatch):
-    monkeypatch.setenv("FERNET_KEY", TEST_KEY)
-    # Also mock SauspielScraper.login to always succeed in these web tests
+def mock_scraper_login(monkeypatch):
+    # Mock SauspielScraper.login to always succeed in these web tests
     monkeypatch.setattr(SauspielScraper, "login", lambda self: True)
 
 
@@ -39,17 +34,18 @@ def test_login_post():
     )
     assert response.status_code == 200
     assert "Welcome, testuser!" in response.text
-    assert "username" in client.cookies
-    assert client.cookies["username"] == "testuser"
+    # We use signed sessions now, so look for the 'session' cookie
+    assert "session" in client.cookies
 
 
 def test_logout():
     # Login first
     client.post("/login", data={"username": "testuser", "password": "password"})
-    assert "username" in client.cookies
+    assert "session" in client.cookies
 
     # Logout
     response = client.get("/logout", follow_redirects=True)
     assert response.status_code == 200
     assert "Welcome, Guest!" in response.text
-    assert "username" not in client.cookies
+    # The session is cleared internally
+    assert "Welcome, Guest!" in response.text

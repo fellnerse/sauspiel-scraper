@@ -1,3 +1,5 @@
+from contextlib import contextmanager
+
 from fastapi.testclient import TestClient
 
 from sauspiel_scraper.app.main import app, scheduler
@@ -30,8 +32,13 @@ def test_scrape_endpoint_triggers_job(monkeypatch):
     import sauspiel_scraper.app.main as main
 
     monkeypatch.setattr(main.scheduler, "add_job", mock_add_job)
+    # Mock scraper login to allow logging in
+    monkeypatch.setattr("sauspiel_scraper.core.SauspielScraper.login", lambda self: True)
 
-    response = client.post("/scrape", cookies={"username": "testuser"})
+    # Log in first to get a signed session cookie
+    client.post("/login", data={"username": "testuser", "password": "password"})
+
+    response = client.post("/scrape")
     assert response.status_code == 200
     assert "Scrape triggered" in response.text
 
@@ -52,20 +59,24 @@ def test_scrape_all_users_logic(monkeypatch):
     scraper_calls = []
 
     class MockDB:
-        def get_all_users(self):
+        @contextmanager
+        def session_scope(self):
+            yield "mock_session"
+
+        def get_all_users(self, session=None):
             return ["testuser"]
 
-        def get_user(self, username):
+        def get_user(self, username, session=None):
             db_calls.append(("get_user", username))
             return mock_user
 
-        def save_game(self, game):
+        def save_game(self, game, session=None):
             db_calls.append(("save_game", game.game_id))
 
-        def update_last_scraped(self, username, ts):
+        def update_last_scraped(self, username, ts, session=None):
             db_calls.append(("update_last_scraped", username, ts))
 
-        def game_exists(self, gid):
+        def game_exists(self, gid, session=None):
             return False
 
     class MockScraper:
