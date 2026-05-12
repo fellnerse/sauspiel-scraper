@@ -53,7 +53,11 @@ From your local machine:
     ```
 2.  **Push Code**:
     ```bash
-    git push dokku feat/dokku-postgres-migration:master
+    git push dokku master
+    ```
+    *Note: If you use squash-rebase on GitHub, you may need to force push to Dokku:*
+    ```bash
+    git push dokku master --force
     ```
 
 ## 5. Schema Migration & Data Transfer

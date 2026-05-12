@@ -67,6 +67,7 @@ jobs:
         with:
           git_remote_url: "ssh://dokku@${{ steps.resolve.outputs.ip }}:22/${{ steps.target.outputs.app }}"
           ssh_private_key: ${{ secrets.SSH_PRIVATE_KEY }}
+          git_push_flags: "--force"
 
         # We also need to provide the host key if we use the IP, or let it scan
         # The action usually does ssh-keyscan.
