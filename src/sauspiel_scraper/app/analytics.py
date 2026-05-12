@@ -2,7 +2,7 @@ import pandas as pd
 import plotly.express as px
 import plotly.io as pio
 
-from sauspiel_scraper.models import Game, ProcessedGame
+from sauspiel_scraper.models import Game, GameResult, ProcessedGame
 
 
 def process_game_data(games: list[Game], me: str) -> list[ProcessedGame]:
@@ -26,31 +26,33 @@ def process_game_data(games: list[Game], me: str) -> list[ProcessedGame]:
         else:
             role = "Spieler" if declarer == me else "Gegenspieler"
 
-        is_declarer_win = g.meta.is_won
-        is_me_declarer_side = role in ["Spieler", "Mitspieler", "Partner"]
+        game_type_raw = (g.game_type or "").lower()
+        is_zamgworfen = "zamgworfen" in game_type_raw
+        is_solo = any(s in game_type_raw for s in ["solo", "wenz", "geier", "bettel"])
 
-        # Base profit calculation logic:
-        # 1. Sauspiel (Partner game): 2 winners get wert/2 each, 2 losers pay wert/2 each.
-        # 2. Solo/Wenz/Geier (1 vs 3):
-        #    - Declarer gets wert (3 * individual) or pays wert (3 * individual).
-        #    - Each opponent pays wert/3 or gets wert/3.
-
-        value = g.meta.value_int
-        game_type = (g.game_type or "").lower()
-        is_solo = any(s in game_type for s in ["solo", "wenz", "geier", "bettel"])
-
-        if is_me_declarer_side:
-            is_my_win = is_declarer_win
-            # Declarer (and partner in Sauspiel) gets/pays the value shown in 'wert'
-            net_profit_cents = value if is_my_win else -value
+        if is_zamgworfen:
+            declarer_result = GameResult.DRAW
+            my_result = GameResult.DRAW
+            net_profit_cents = 0
         else:
-            is_my_win = not is_declarer_win
-            if is_solo:
-                # In Solo, the 'wert' is the total declarer value, so each opponent gets 1/3
-                net_profit_cents = (-value if is_declarer_win else value) // 3
+            is_declarer_win = g.meta.is_won
+            is_me_declarer_side = role in ["Spieler", "Mitspieler", "Partner"]
+
+            value = g.meta.value_int
+
+            if is_me_declarer_side:
+                my_win_bool = is_declarer_win
+                net_profit_cents = value if my_win_bool else -value
             else:
-                # In Sauspiel, each opponent pays/gets the full value shown in 'wert'
-                net_profit_cents = -value if is_declarer_win else value
+                my_win_bool = not is_declarer_win
+                if is_solo:
+                    net_profit_cents = (-value if is_declarer_win else value) // 3
+                else:
+                    net_profit_cents = -value if is_declarer_win else value
+
+            declarer_result = GameResult.WIN if is_declarer_win else GameResult.LOSS
+            my_result = GameResult.WIN if my_win_bool else GameResult.LOSS
+
         processed.append(
             ProcessedGame(
                 game_id=g.game_id,
@@ -58,8 +60,8 @@ def process_game_data(games: list[Game], me: str) -> list[ProcessedGame]:
                 game_type=g.game_type or "Unknown",
                 declarer=declarer,
                 role=role,
-                is_declarer_win=is_declarer_win,
-                is_my_win=is_my_win,
+                declarer_result=declarer_result,
+                my_result=my_result,
                 net_profit_cents=net_profit_cents,
                 laufende=g.meta.laufende_int,
                 location=g.meta.location or "Unknown",
@@ -79,7 +81,7 @@ def games_to_df(games: list[ProcessedGame]) -> pd.DataFrame:
     df = df.rename(
         columns={
             "game_type": "type",
-            "is_my_win": "won",
+            "my_result": "won",
             "net_profit_cents": "value",
         }
     )
@@ -122,14 +124,16 @@ def render_analytics(games: list[ProcessedGame]) -> dict[str, str]:
     )
 
     # Win/Loss Distribution
-    # Map boolean to strings for better legend
-    df["Result"] = df["won"].map({True: "Win", False: "Loss"})
+    # Map enum to strings for better legend
+    df["Result"] = df["won"].map(
+        {GameResult.WIN: "Win", GameResult.LOSS: "Loss", GameResult.DRAW: "Draw"}
+    )
     fig_winloss = px.pie(
         df,
         names="Result",
         title="Win/Loss Distribution",
         color="Result",
-        color_discrete_map={"Win": "#4caf50", "Loss": "#f44336"},
+        color_discrete_map={"Win": "#4caf50", "Loss": "#f44336", "Draw": "#9e9e9e"},
         template="plotly_white",
     )
 

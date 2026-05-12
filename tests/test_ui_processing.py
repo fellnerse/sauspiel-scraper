@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from sauspiel_scraper.app.analytics import games_to_df, process_game_data
-from sauspiel_scraper.models import Game, GameMeta
+from sauspiel_scraper.models import Game, GameMeta, GameResult
 
 
 def test_process_game_data_with_dash_laufende():
@@ -81,13 +81,13 @@ def test_process_game_data_profit_calculation():
     assert len(processed) == 2
     # First game: player1 is declarer, won 20
     assert processed[0].role == "Spieler"
-    assert processed[0].is_my_win is True
+    assert processed[0].my_result == GameResult.WIN
     assert processed[0].net_profit_cents == 20
 
     # Second game: player1 is opponent, declarer (player2) lost 30
     # Thus player1 won 30!
     assert processed[1].role == "Gegenspieler"
-    assert processed[1].is_my_win is True
+    assert processed[1].my_result == GameResult.WIN
     assert processed[1].net_profit_cents == 30
 
     # Test conversion to DataFrame
@@ -113,8 +113,8 @@ def test_process_game_data_opponent_lost():
     ]
     processed = process_game_data(mock_games, "player1")
     assert processed[0].role == "Gegenspieler"
-    assert processed[0].is_declarer_win is True
-    assert processed[0].is_my_win is False
+    assert processed[0].declarer_result == GameResult.WIN
+    assert processed[0].my_result == GameResult.LOSS
     assert processed[0].net_profit_cents == -50
 
 
@@ -135,7 +135,7 @@ def test_process_game_data_mitspieler_role():
     ]
     processed = process_game_data(mock_games, "player1")
     assert processed[0].role == "Mitspieler"
-    assert processed[0].is_my_win is True
+    assert processed[0].my_result == GameResult.WIN
     assert processed[0].net_profit_cents == 80
 
 
@@ -155,7 +155,7 @@ def test_process_game_data_solo_opponent():
     ]
     processed = process_game_data(mock_games, "player1")
     assert processed[0].role == "Gegenspieler"
-    assert processed[0].is_my_win is False
+    assert processed[0].my_result == GameResult.LOSS
     # Should be -100 (300 / 3)
     assert processed[0].net_profit_cents == -100
 
@@ -176,6 +176,27 @@ def test_process_game_data_solo_declarer():
     ]
     processed = process_game_data(mock_games, "player1")
     assert processed[0].role == "Spieler"
-    assert processed[0].is_my_win is False
+    assert processed[0].my_result == GameResult.LOSS
     # Should be -420 (Total loss for declarer)
     assert processed[0].net_profit_cents == -420
+
+
+def test_process_game_data_zamgworfen():
+    mock_games = [
+        Game(
+            game_id="8",
+            game_type="Zamgworfen",
+            title="Zamgworfen",
+            roles={"player1": "Gegenspieler", "player2": "Spieler"},
+            meta=GameMeta(
+                date=datetime(2024, 3, 20, 12, 35),
+                wert="0",
+                spielausgang="–",
+            ),
+        )
+    ]
+    processed = process_game_data(mock_games, "player1")
+    assert processed[0].game_type == "Zamgworfen"
+    assert processed[0].my_result == GameResult.DRAW
+    assert processed[0].declarer_result == GameResult.DRAW
+    assert processed[0].net_profit_cents == 0
