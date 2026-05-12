@@ -76,9 +76,11 @@ endblock %} {% block content %}
                             class="badge"
                             style="color: {{ 'green' if game.my_result == 'win' else ('red' if game.my_result == 'loss' else 'gray') }}"
                         >
-                            {{ 'Win' if game.my_result == 'win' else ('Loss' if game.my_result == 'loss' else 'Draw') }}
+                            {{ 'Win' if game.my_result == 'win' else ('Loss' if
+                            game.my_result == 'loss' else 'Draw') }}
                         </span>
                     </td>
+                    <td>
                         {{ "%.2f" | format(game.net_profit_cents / 100.0) }}€
                     </td>
                 </tr>
