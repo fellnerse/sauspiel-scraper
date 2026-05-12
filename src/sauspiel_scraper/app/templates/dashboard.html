@@ -16,30 +16,24 @@ endblock %} {% block content %}
     {% else %}
     <article>
         <header>Scrape Settings</header>
-        <form hx-post="/scrape" hx-target="#scrape-status" hx-swap="outerHTML">
+        <form hx-post="/scrape" hx-target="#scrape-status" hx-swap="innerHTML">
             <div class="grid">
                 <div>
-                    <label for="balance_type">Game Type</label>
-                    <select id="balance_type" name="game[balance_type]">
-                        <option value="-1">Alle</option>
-                        <option value="1">Echtgeld</option>
-                        <option value="0">Spielgeld</option>
+                    <label for="limit">Max Games</label>
+                    <select id="limit" name="limit">
+                        <option value="20">20</option>
+                        <option value="50">50</option>
+                        <option value="100" selected>100</option>
+                        <option value="500">500</option>
+                        <option value="1000">1000</option>
                     </select>
                 </div>
                 <div>
-                    <label for="role">Role</label>
-                    <select id="role" name="role">
-                        <option value="all">Alle</option>
-                        <option value="mitspieler">Mitspieler</option>
-                        <option value="gegner">Gegner</option>
-                    </select>
-                </div>
-                <div>
-                    <label for="won">Result</label>
-                    <select id="won" name="game[won]">
-                        <option value="-1">Alle</option>
-                        <option value="1">Gewonnen</option>
-                        <option value="0">Verloren</option>
+                    <label for="since_period">Sync Since</label>
+                    <select id="since_period" name="since_period">
+                        <option value="month" selected>This Month</option>
+                        <option value="week">Last 7 Days</option>
+                        <option value="all">All Time (Careful!)</option>
                     </select>
                 </div>
             </div>

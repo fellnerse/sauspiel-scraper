@@ -120,3 +120,94 @@ def test_scrape_all_users_logic(monkeypatch):
     assert ("login", "testuser") in scraper_calls
     assert ("save_game", "123") in db_calls
     assert any(c[0] == "update_last_scraped" and c[1] == "testuser" for c in db_calls)
+
+
+def test_scrape_with_filters(monkeypatch):
+    """Test /scrape with custom limit and period."""
+    from datetime import datetime, timedelta
+
+    from sauspiel_scraper.app.main import active_scrapes
+
+    active_scrapes.clear()
+    added_jobs = []
+
+    def mock_add_job(func, *args, **kwargs):
+        added_jobs.append((func, args, kwargs))
+
+    import sauspiel_scraper.app.main as main
+
+    monkeypatch.setattr(main.scheduler, "add_job", mock_add_job)
+    monkeypatch.setattr("sauspiel_scraper.core.SauspielScraper.login", lambda self: True)
+
+    client.post("/login", data={"username": "testuser", "password": "password"})
+
+    # Test custom limit and period
+    response = client.post("/scrape", data={"limit": "50", "since_period": "week"})
+    assert response.status_code == 200
+    assert len(added_jobs) == 1
+
+    job_func, job_args_pos, job_kwargs = added_jobs[0]
+    inner_args = job_kwargs["args"]
+    assert inner_args[0] == "testuser"
+    assert inner_args[1] == 50
+    expected_since = datetime.now() - timedelta(days=7)
+    assert abs((inner_args[2] - expected_since).total_seconds()) < 60
+
+
+def test_scrape_with_all_time(monkeypatch):
+    """Test /scrape with 'all time' sync."""
+    from datetime import datetime
+
+    from sauspiel_scraper.app.main import active_scrapes
+
+    active_scrapes.clear()
+    added_jobs = []
+
+    def mock_add_job(func, *args, **kwargs):
+        added_jobs.append((func, args, kwargs))
+
+    import sauspiel_scraper.app.main as main
+
+    monkeypatch.setattr(main.scheduler, "add_job", mock_add_job)
+    monkeypatch.setattr("sauspiel_scraper.core.SauspielScraper.login", lambda self: True)
+
+    client.post("/login", data={"username": "testuser", "password": "password"})
+
+    response = client.post("/scrape", data={"limit": "500", "since_period": "all"})
+    assert response.status_code == 200
+    assert len(added_jobs) == 1
+
+    job_func, job_args_pos, job_kwargs = added_jobs[0]
+    inner_args = job_kwargs["args"]
+    assert inner_args[1] == 500
+    assert inner_args[2] == datetime(2000, 1, 1)
+
+
+def test_scrape_defaults(monkeypatch):
+    """Test /scrape with default values."""
+    from datetime import datetime
+
+    from sauspiel_scraper.app.main import active_scrapes
+
+    active_scrapes.clear()
+    added_jobs = []
+
+    def mock_add_job(func, *args, **kwargs):
+        added_jobs.append((func, args, kwargs))
+
+    import sauspiel_scraper.app.main as main
+
+    monkeypatch.setattr(main.scheduler, "add_job", mock_add_job)
+    monkeypatch.setattr("sauspiel_scraper.core.SauspielScraper.login", lambda self: True)
+
+    client.post("/login", data={"username": "testuser", "password": "password"})
+
+    response = client.post("/scrape", data={})  # No data
+    assert response.status_code == 200
+    assert len(added_jobs) == 1
+
+    job_func, job_args_pos, job_kwargs = added_jobs[0]
+    inner_args = job_kwargs["args"]
+    assert inner_args[1] == 100  # Default limit
+    expected_since = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    assert inner_args[2] == expected_since
