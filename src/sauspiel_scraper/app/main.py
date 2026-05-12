@@ -60,12 +60,18 @@ app.add_middleware(
 
 
 def scrape_all_users(
-    username: str | None = None, search_params: dict | None = None, job_id: str | None = None
+    username: str | None = None,
+    max_new: int = 100,
+    since: datetime | None = None,
+    job_id: str | None = None,
 ):
     """
     Background task to scrape games for one or all users.
     """
-    logger.info(f"Starting background scrape task. requested_user={repr(username)}")
+    logger.info(
+        f"Starting background scrape task. requested_user={repr(username)} "
+        f"max_new={max_new} since={since}"
+    )
 
     if job_id and job_id in active_scrapes:
         active_scrapes[job_id] = {
@@ -74,6 +80,10 @@ def scrape_all_users(
             "progress": 0,
             "total": 0,
         }
+
+    # Default 'since' to first of month if not provided
+    if since is None:
+        since = datetime.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     with db.session_scope() as session:
         all_db_users = db.get_all_users(session=session)
@@ -99,13 +109,8 @@ def scrape_all_users(
                 scraper = SauspielScraper(uname, password, rate_limiter=global_rate_limiter)
 
                 if scraper.login():
-                    # Fetch new game previews for the current month only
-                    first_of_month = datetime.now().replace(
-                        day=1, hour=0, minute=0, second=0, microsecond=0
-                    )
-                    new_games = scraper.get_game_list_paginated(
-                        max_new=100, since=first_of_month, db=db, search_params=search_params
-                    )
+                    # Fetch new game previews
+                    new_games = scraper.get_game_list_paginated(max_new=max_new, since=since, db=db)
 
                     total_games = len(new_games)
                     if job_id and job_id in active_scrapes:
@@ -213,15 +218,33 @@ async def trigger_scrape(request: Request):
         return HTMLResponse("Not logged in", status_code=401)
 
     form_data = await request.form()
-    search_params = {k: v for k, v in form_data.items() if v}
+
+    # Parse limit
+    try:
+        limit_val = form_data.get("limit", "100")
+        limit = int(str(limit_val))
+    except (ValueError, TypeError):
+        limit = 100
+
+    # Parse since_period
+    since_period = str(form_data.get("since_period", "month"))
+    now = datetime.now()
+    if since_period == "week":
+        from datetime import timedelta
+
+        since = now - timedelta(days=7)
+    elif since_period == "all":
+        since = datetime(2000, 1, 1)  # Effectively all time
+    else:  # month
+        since = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     job_id = f"manual_{username}"
     if job_id in active_scrapes:
         return HTMLResponse("<span>Scrape already in progress...</span>")
 
-    def scrape_wrapper(uname, params):
+    def scrape_wrapper(uname, l_val, s_val):
         try:
-            scrape_all_users(uname, search_params=params, job_id=job_id)
+            scrape_all_users(uname, max_new=l_val, since=s_val, job_id=job_id)
         finally:
             active_scrapes.pop(job_id, None)
 
@@ -231,7 +254,7 @@ async def trigger_scrape(request: Request):
         "progress": 0,
         "total": 0,
     }
-    scheduler.add_job(scrape_wrapper, args=[username, search_params], id=job_id)
+    scheduler.add_job(scrape_wrapper, args=[username, limit, since], id=job_id)
 
     return HTMLResponse("""
         <div hx-get="/scrape/status" hx-trigger="every 1s" hx-target="this" hx-swap="outerHTML">

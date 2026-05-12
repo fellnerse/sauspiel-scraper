@@ -1,7 +1,14 @@
 import re
 from datetime import datetime
+from enum import StrEnum
 
 from pydantic import BaseModel, Field
+
+
+class GameResult(StrEnum):
+    WIN = "win"
+    LOSS = "loss"
+    DRAW = "draw"
 
 
 class Trick(BaseModel):
@@ -73,8 +80,8 @@ class ProcessedGame(BaseModel):
     game_type: str
     declarer: str
     role: str
-    is_declarer_win: bool
-    is_my_win: bool
+    declarer_result: GameResult
+    my_result: GameResult
     net_profit_cents: int
     laufende: int
     location: str
